@@ -195,9 +195,10 @@ textarea { resize: vertical; min-height: 70px; }
 <div class="main">
   <div class="topbar">
     <div class="topbar-title" id="topbar-title">Dashboard</div>
-    <div style="display:flex;align-items:center;gap:10px;">
+    <div style="display:flex;align-items:center;gap:8px;">
       <div class="topbar-date" id="topbar-date"></div>
       <span id="sync-badge"></span>
+      <button class="btn btn-sm btn-secondary" onclick="showCloudSettings()" title="Set up cloud sync to access your data from any device" style="font-size:11px;">☁️ Cloud Sync</button>
     </div>
   </div>
   <div class="content" id="main-content"></div>
@@ -242,8 +243,57 @@ let db = {
 // true when the app is being served by server.js (network mode)
 let _serverMode = false;
 
+// Cloud sync via GitHub Gist (credentials stored in localStorage only, never in code)
+let _cloudMode   = false;
+let _cloudPAT    = localStorage.getItem('cc_cloud_pat')     || '';
+let _cloudGistId = localStorage.getItem('cc_cloud_gist_id') || '';
+
 async function loadDB() {
-  // ── Try server first (network mode) ─────────────────────────
+  // ── 1. Cloud (GitHub Gist) — highest priority ────────────────
+  if (_cloudPAT) {
+    try {
+      // Auto-discover gist if ID not cached on this device
+      if (!_cloudGistId) {
+        const ctrl = new AbortController();
+        const t    = setTimeout(() => ctrl.abort(), 8000);
+        const res  = await fetch('https://api.github.com/gists?per_page=100', {
+          signal: ctrl.signal,
+          headers: { 'Authorization': `Bearer ${_cloudPAT}`, 'Accept': 'application/vnd.github+json' }
+        });
+        clearTimeout(t);
+        if (res.ok) {
+          const list  = await res.json();
+          const found = list.find(g => g.description === 'Common Cents Data' && g.files?.['data.json']);
+          if (found) {
+            _cloudGistId = found.id;
+            localStorage.setItem('cc_cloud_gist_id', _cloudGistId);
+          }
+        }
+      }
+
+      if (_cloudGistId) {
+        const ctrl = new AbortController();
+        const t    = setTimeout(() => ctrl.abort(), 8000);
+        const res  = await fetch(`https://api.github.com/gists/${_cloudGistId}`, {
+          signal: ctrl.signal,
+          headers: { 'Authorization': `Bearer ${_cloudPAT}`, 'Accept': 'application/vnd.github+json' }
+        });
+        clearTimeout(t);
+        if (res.ok) {
+          const gist = await res.json();
+          const raw  = gist.files?.['data.json']?.content;
+          if (raw) {
+            db = JSON.parse(raw);
+            _cloudMode = true;
+            localStorage.setItem('cc_data_v2', raw); // local cache for offline fallback
+            return;
+          }
+        }
+      }
+    } catch (_) { /* cloud unavailable — fall through */ }
+  }
+
+  // ── 2. Local network server ──────────────────────────────────
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2000);
@@ -255,31 +305,23 @@ async function loadDB() {
       _serverMode = true;
 
       if (data && data.accounts && data.accounts.length > 0) {
-        // Server has data — use it
         db = data;
         return;
       }
 
-      // Server is empty — migrate any existing localStorage data up to it
+      // Server empty — migrate localStorage up to it
       try {
         const raw = localStorage.getItem('cc_data_v2');
         if (raw) {
           const local = JSON.parse(raw);
-          if (local && local.accounts) {
-            db = local;
-            saveDB(); // push local data to server
-            return;
-          }
+          if (local && local.accounts) { db = local; saveDB(); return; }
         }
       } catch (_) {}
-      // Server available, no data anywhere — start fresh (defaults already set)
       return;
     }
-  } catch (_) {
-    // Server not running — fall through to localStorage
-  }
+  } catch (_) { /* server not running */ }
 
-  // ── Fallback: localStorage (single-device / file:// mode) ────
+  // ── 3. localStorage fallback ─────────────────────────────────
   try {
     const raw = localStorage.getItem('cc_data_v2');
     if (raw) db = JSON.parse(raw);
@@ -287,17 +329,27 @@ async function loadDB() {
 }
 
 function saveDB() {
-  if (_serverMode) {
+  const json = JSON.stringify(db);
+  // Always write a local cache so the app works offline / after cloud errors
+  localStorage.setItem('cc_data_v2', json);
+
+  if (_cloudMode && _cloudPAT && _cloudGistId) {
+    // Cloud sync — fire-and-forget (local cache already written above)
+    fetch(`https://api.github.com/gists/${_cloudGistId}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${_cloudPAT}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ files: { 'data.json': { content: json } } })
+    }).catch(() => { /* silently ignore — local cache is the fallback */ });
+  } else if (_serverMode) {
     fetch('/api/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(db)
-    }).catch(() => {
-      // Server disappeared mid-session — keep a local copy
-      localStorage.setItem('cc_data_v2', JSON.stringify(db));
-    });
-  } else {
-    localStorage.setItem('cc_data_v2', JSON.stringify(db));
+      body: json
+    }).catch(() => { /* local cache already written */ });
   }
 }
 
@@ -1401,6 +1453,161 @@ function removeReceipt(id) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// CLOUD SYNC (GitHub Gist)
+// ═══════════════════════════════════════════════════════════
+
+function showCloudSettings() {
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">☁️ Cloud Sync</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          ${_cloudMode
+            ? `<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+                <div style="font-weight:700;color:#065f46;margin-bottom:4px;">☁️ Connected — Cloud Sync Active</div>
+                <div style="font-size:12px;color:#047857;line-height:1.6;">Your data syncs automatically. Open this app on any device, enter the same token, and your data will load.</div>
+               </div>
+               <div class="form-group">
+                 <label>Gist ID <span style="font-weight:400;text-transform:none;color:#94a3b8">(save this to connect other devices)</span></label>
+                 <input type="text" value="${escHtml(_cloudGistId)}" readonly style="font-family:monospace;font-size:12px;color:#475569;background:#f8fafc;">
+               </div>`
+            : `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:13px;color:#1e40af;line-height:1.7;">
+                 <strong>How to set up:</strong><br>
+                 1. Go to <strong>github.com/settings/tokens</strong><br>
+                 2. Click <em>Generate new token (classic)</em><br>
+                 3. Check only the <strong>gist</strong> scope<br>
+                 4. Copy the token and paste it below<br>
+                 5. Click <strong>Connect</strong> — your data uploads automatically
+               </div>`}
+          <div class="form-group">
+            <label>GitHub Personal Access Token</label>
+            <input type="password" id="cloud-pat" value="${escHtml(_cloudPAT)}" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+            <div class="form-hint">Stored only on this device in your browser. Never committed to any file.</div>
+          </div>
+          <div class="form-group">
+            <label>Gist ID <span style="font-weight:400;text-transform:none;color:#94a3b8">(leave blank on first device — auto-created)</span></label>
+            <input type="text" id="cloud-gist" value="${escHtml(_cloudGistId)}" placeholder="Auto-discovered or created on connect" style="font-family:monospace;font-size:12px;">
+            <div class="form-hint">On a second device: enter your token + the Gist ID shown above, then click Connect.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          ${_cloudMode ? `<button class="btn btn-danger" onclick="disconnectCloud()">Disconnect</button>` : ''}
+          <button class="btn btn-primary" id="cloud-connect-btn" onclick="connectCloud()">${_cloudMode ? 'Reconnect' : 'Connect & Sync'}</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.getElementById('cloud-pat').focus();
+}
+
+async function connectCloud() {
+  const pat    = document.getElementById('cloud-pat').value.trim();
+  const gistId = document.getElementById('cloud-gist').value.trim();
+  if (!pat) return alert('Please enter your GitHub Personal Access Token.');
+
+  const btn = document.getElementById('cloud-connect-btn');
+  if (btn) { btn.textContent = 'Connecting…'; btn.disabled = true; }
+
+  try {
+    let resolvedId = gistId;
+
+    // Search for existing gist if no ID provided
+    if (!resolvedId) {
+      const res = await fetch('https://api.github.com/gists?per_page=100', {
+        headers: { 'Authorization': `Bearer ${pat}`, 'Accept': 'application/vnd.github+json' }
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.message || `GitHub error ${res.status}`); }
+      const list  = await res.json();
+      const found = list.find(g => g.description === 'Common Cents Data' && g.files?.['data.json']);
+      if (found) resolvedId = found.id;
+    }
+
+    let cloudData = null;
+
+    if (resolvedId) {
+      // Load existing gist
+      const res = await fetch(`https://api.github.com/gists/${resolvedId}`, {
+        headers: { 'Authorization': `Bearer ${pat}`, 'Accept': 'application/vnd.github+json' }
+      });
+      if (!res.ok) throw new Error(`Could not read gist (${res.status})`);
+      const gist = await res.json();
+      const raw  = gist.files?.['data.json']?.content;
+      if (raw) cloudData = JSON.parse(raw);
+    } else {
+      // No existing gist — create one with current local data
+      const res = await fetch('https://api.github.com/gists', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${pat}`,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          description: 'Common Cents Data',
+          public: false,
+          files: { 'data.json': { content: JSON.stringify(db) } }
+        })
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.message || `Failed to create gist (${res.status})`); }
+      const gist = await res.json();
+      resolvedId = gist.id;
+    }
+
+    // Persist credentials on this device
+    localStorage.setItem('cc_cloud_pat',     pat);
+    localStorage.setItem('cc_cloud_gist_id', resolvedId);
+    _cloudPAT    = pat;
+    _cloudGistId = resolvedId;
+    _cloudMode   = true;
+    _serverMode  = false;
+
+    // Use cloud data if it exists
+    if (cloudData) {
+      db = cloudData;
+      localStorage.setItem('cc_data_v2', JSON.stringify(cloudData));
+    } else {
+      saveDB(); // push current local data to the new gist
+    }
+
+    closeModal();
+    updateSyncBadge();
+    const renders = { dashboard: renderDashboard, accounts: renderAccounts, transactions: renderTransactions, invoices: renderInvoices, reports: renderReports };
+    if (renders[currentPage]) renders[currentPage]();
+
+  } catch (err) {
+    alert(`Connection failed: ${err.message}\n\nMake sure:\n• The token has the "gist" scope\n• You are connected to the internet`);
+    if (btn) { btn.textContent = _cloudMode ? 'Reconnect' : 'Connect & Sync'; btn.disabled = false; }
+  }
+}
+
+function disconnectCloud() {
+  if (!confirm('Disconnect cloud sync on this device?\n\nYour local data and the cloud gist are kept — nothing is deleted.')) return;
+  localStorage.removeItem('cc_cloud_pat');
+  localStorage.removeItem('cc_cloud_gist_id');
+  _cloudPAT    = '';
+  _cloudGistId = '';
+  _cloudMode   = false;
+  closeModal();
+  updateSyncBadge();
+}
+
+function updateSyncBadge() {
+  const badge = document.getElementById('sync-badge');
+  if (!badge) return;
+  if (_cloudMode) {
+    badge.innerHTML = '<span style="display:inline-flex;align-items:center;gap:4px;background:#eff6ff;color:#1d4ed8;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;" title="Cloud sync active — click to manage" onclick="showCloudSettings()">☁️ Cloud</span>';
+  } else if (_serverMode) {
+    badge.innerHTML = '<span style="display:inline-flex;align-items:center;gap:4px;background:#d1fae5;color:#059669;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;" title="Data shared across all devices on your network">🌐 Network</span>';
+  } else {
+    badge.innerHTML = '<span style="display:inline-flex;align-items:center;gap:4px;background:#f1f5f9;color:#64748b;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;" title="Local only — click to set up cloud sync" onclick="showCloudSettings()">💾 Local</span>';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // BUSINESS INFO + INVOICE PDF
 // ═══════════════════════════════════════════════════════════
 
@@ -1599,13 +1806,7 @@ document.getElementById('topbar-date').textContent =
 
 // Load data, then render
 loadDB().then(() => {
-  // Show network / local indicator
-  const badge = document.getElementById('sync-badge');
-  if (_serverMode) {
-    badge.innerHTML = '<span style="display:inline-flex;align-items:center;gap:4px;background:#d1fae5;color:#059669;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;" title="Data shared across all devices on your network">🌐 Network</span>';
-  } else {
-    badge.innerHTML = '<span style="display:inline-flex;align-items:center;gap:4px;background:#f1f5f9;color:#64748b;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;" title="Data stored locally in this browser only">💾 Local</span>';
-  }
+  updateSyncBadge();
   renderDashboard();
 });
 </script>
