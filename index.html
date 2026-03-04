@@ -160,43 +160,9 @@ textarea { resize: vertical; min-height: 70px; }
 .receipt-badge:hover { background: #fde68a; }
 .receipt-modal-img { max-width: 100%; max-height: 65vh; border-radius: 8px; border: 1px solid #e2e8f0; display: block; margin: 0 auto; }
 
-/* ── Login screen ── */
-#login-screen { position: fixed; inset: 0; background: #f1f5f9; display: flex; align-items: center; justify-content: center; z-index: 1000; }
-#login-screen.hidden { display: none; }
-.login-card { background: #fff; border-radius: 16px; border: 1px solid #e2e8f0; padding: 36px 40px; width: 100%; max-width: 380px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
-.login-logo { font-size: 22px; font-weight: 800; color: #1e293b; letter-spacing: -0.5px; margin-bottom: 4px; }
-.login-logo span { color: #2563eb; }
-.login-subtitle { font-size: 13px; color: #64748b; margin-bottom: 28px; }
-.login-title { font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 20px; }
-.login-error { background: #fee2e2; color: #991b1b; border-radius: 7px; padding: 9px 12px; font-size: 13px; margin-bottom: 14px; display: none; }
-.login-switch { text-align: center; margin-top: 16px; font-size: 13px; color: #64748b; }
-.login-switch a { color: #2563eb; cursor: pointer; text-decoration: none; font-weight: 500; }
-.login-switch a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
-
-<!-- ── Login / Register screen (shown when server mode needs auth) ── -->
-<div id="login-screen" class="hidden">
-  <div class="login-card">
-    <div class="login-logo">Common <span>Cents</span></div>
-    <div class="login-subtitle">Self-hosted accounting</div>
-    <div class="login-title" id="login-screen-title">Sign in to your account</div>
-    <div class="login-error" id="login-error"></div>
-    <div class="form-group">
-      <label>Username</label>
-      <input type="text" id="login-username" autocomplete="username" placeholder="your-username" oninput="document.getElementById('login-error').style.display='none'">
-    </div>
-    <div class="form-group">
-      <label>Password</label>
-      <input type="password" id="login-password" autocomplete="current-password" placeholder="••••••••" oninput="document.getElementById('login-error').style.display='none'" onkeydown="if(event.key==='Enter')submitLoginForm()">
-    </div>
-    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:10px;" onclick="submitLoginForm()" id="login-btn">Sign In</button>
-    <div class="login-switch" id="login-switch-text">
-      Don't have an account? <a onclick="toggleLoginMode()">Create one</a>
-    </div>
-  </div>
-</div>
 
 <!-- ══════════════════════════════════════════════════ SIDEBAR -->
 <div class="sidebar">
@@ -234,7 +200,6 @@ textarea { resize: vertical; min-height: 70px; }
       <div class="topbar-date" id="topbar-date"></div>
       <span id="sync-badge"></span>
       <button class="btn btn-sm btn-secondary" onclick="showCloudSettings()" title="Set up cloud sync to access your data from any device" style="font-size:11px;">☁️ Cloud Sync</button>
-      <span id="user-badge" style="display:none;font-size:12px;color:#64748b;align-items:center;gap:6px;"></span>
     </div>
   </div>
   <div class="content" id="main-content"></div>
@@ -278,11 +243,6 @@ let db = {
 
 // true when the app is being served by server.js (network mode)
 let _serverMode = false;
-
-// Server auth (stored in localStorage; cleared on logout)
-let _authToken = localStorage.getItem('cc_auth_token') || '';
-let _authUser  = localStorage.getItem('cc_auth_user')  || '';
-let _loginMode = 'login'; // 'login' | 'register'
 
 // Cloud sync via GitHub Gist (credentials stored in localStorage only, never in code)
 let _cloudMode          = false;
@@ -342,16 +302,8 @@ async function loadDB() {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2000);
-    const headers = _authToken ? { 'Authorization': `Bearer ${_authToken}` } : {};
-    const res = await fetch('/api/data', { signal: controller.signal, headers });
+    const res = await fetch('/api/data', { signal: controller.signal });
     clearTimeout(timer);
-
-    if (res.status === 401) {
-      // Server is running but user needs to log in
-      _serverMode = true;
-      showLoginScreen();
-      return;
-    }
 
     if (res.ok) {
       const data = await res.json();
@@ -399,10 +351,11 @@ function saveDB() {
       body: JSON.stringify({ files: { 'data.json': { content: json } } })
     }).catch(() => { /* silently ignore — local cache is the fallback */ });
   } else if (_serverMode) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (_authToken) headers['Authorization'] = `Bearer ${_authToken}`;
-    fetch('/api/data', { method: 'POST', headers, body: json })
-      .catch(() => { /* local cache already written */ });
+    fetch('/api/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: json
+    }).catch(() => { /* local cache already written */ });
   }
 }
 
@@ -1506,108 +1459,6 @@ function removeReceipt(id) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// SERVER AUTH (multi-user login)
-// ═══════════════════════════════════════════════════════════
-
-function showLoginScreen() {
-  document.getElementById('login-screen').classList.remove('hidden');
-  setTimeout(() => document.getElementById('login-username').focus(), 50);
-}
-
-function hideLoginScreen() {
-  document.getElementById('login-screen').classList.add('hidden');
-}
-
-function toggleLoginMode() {
-  _loginMode = _loginMode === 'login' ? 'register' : 'login';
-  const isReg = _loginMode === 'register';
-  document.getElementById('login-screen-title').textContent = isReg ? 'Create an account' : 'Sign in to your account';
-  document.getElementById('login-btn').textContent          = isReg ? 'Create Account' : 'Sign In';
-  document.getElementById('login-switch-text').innerHTML    = isReg
-    ? 'Already have an account? <a onclick="toggleLoginMode()">Sign in</a>'
-    : 'Don\'t have an account? <a onclick="toggleLoginMode()">Create one</a>';
-  document.getElementById('login-error').style.display = 'none';
-}
-
-async function submitLoginForm() {
-  const username = document.getElementById('login-username').value.trim();
-  const password = document.getElementById('login-password').value;
-  const errEl    = document.getElementById('login-error');
-  const btn      = document.getElementById('login-btn');
-
-  if (!username || !password) {
-    errEl.textContent = 'Please enter a username and password.';
-    errEl.style.display = 'block';
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = _loginMode === 'register' ? 'Creating…' : 'Signing in…';
-
-  try {
-    const endpoint = _loginMode === 'register' ? '/api/register' : '/api/login';
-    const res  = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      errEl.textContent    = data.error || 'Something went wrong.';
-      errEl.style.display  = 'block';
-      btn.disabled         = false;
-      btn.textContent      = _loginMode === 'register' ? 'Create Account' : 'Sign In';
-      return;
-    }
-
-    // Success — store credentials and load data
-    _authToken = data.token;
-    _authUser  = data.username;
-    localStorage.setItem('cc_auth_token', _authToken);
-    localStorage.setItem('cc_auth_user',  _authUser);
-
-    hideLoginScreen();
-    updateUserBadge();
-    await loadDB();
-    navigate(currentPage);
-    updateSyncBadge();
-  } catch (_) {
-    errEl.textContent   = 'Could not reach the server. Check your connection.';
-    errEl.style.display = 'block';
-    btn.disabled        = false;
-    btn.textContent     = _loginMode === 'register' ? 'Create Account' : 'Sign In';
-  }
-}
-
-async function logout() {
-  if (!confirm(`Sign out of "${_authUser}"?`)) return;
-  try {
-    await fetch('/api/logout', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${_authToken}` }
-    });
-  } catch (_) {}
-  _authToken = '';
-  _authUser  = '';
-  localStorage.removeItem('cc_auth_token');
-  localStorage.removeItem('cc_auth_user');
-  updateUserBadge();
-  showLoginScreen();
-}
-
-function updateUserBadge() {
-  const el = document.getElementById('user-badge');
-  if (!el) return;
-  if (_authUser && _serverMode) {
-    el.style.display = 'inline-flex';
-    el.innerHTML = `<span style="color:#475569;">👤 ${escHtml(_authUser)}</span> <button class="btn btn-sm btn-secondary" style="font-size:11px;" onclick="logout()">Sign Out</button>`;
-  } else {
-    el.style.display = 'none';
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
 // CLOUD SYNC (GitHub Gist)
 // ═══════════════════════════════════════════════════════════
 
@@ -2006,8 +1857,6 @@ document.getElementById('topbar-date').textContent =
 // Load data, then render
 loadDB().then(() => {
   updateSyncBadge();
-  updateUserBadge();
-  if (!document.getElementById('login-screen').classList.contains('hidden')) return; // waiting for login
   renderDashboard();
   if (_cloudMode) startCloudPolling();
 });

@@ -1,78 +1,23 @@
 'use strict';
 
 /**
- * Common Cents — Multi-User Server
- * Each user has their own account and private data.
+ * Common Cents — Local Network Server
+ * Serves the app over your Wi-Fi so any device can access it.
  * Requires Node.js (https://nodejs.org) — no npm install needed.
  *
  * Usage:  node server.js
  *    or:  double-click start-server.bat
  */
 
-const http   = require('http');
-const fs     = require('fs');
-const path   = require('path');
-const os     = require('os');
-const url    = require('url');
-const crypto = require('crypto');
+const http = require('http');
+const fs   = require('fs');
+const path = require('path');
+const os   = require('os');
+const url  = require('url');
 
-const PORT       = 3000;
-const ROOT       = __dirname;
-const USERS_FILE = path.join(ROOT, 'users.json');
-
-// In-memory sessions: token → username (lowercased)
-const sessions = new Map();
-
-// ── User store helpers ────────────────────────────────────────
-function loadUsers() {
-  try { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); }
-  catch (_) { return {}; }
-}
-
-function saveUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
-}
-
-function hashPassword(password, salt) {
-  return crypto.createHash('sha256').update(salt + password).digest('hex');
-}
-
-function genToken() {
-  return crypto.randomBytes(32).toString('hex');
-}
-
-// One data file per user — only allow safe filename characters
-function dataFile(username) {
-  return path.join(ROOT, `data-${username.replace(/[^a-z0-9_-]/g, '_')}.json`);
-}
-
-// Extract the authenticated username from the Authorization header, or null
-function getAuthUser(req) {
-  const h = req.headers['authorization'] || '';
-  const m = h.match(/^Bearer (.+)$/);
-  return m ? (sessions.get(m[1]) || null) : null;
-}
-
-// Read the full request body, capped at 150 MB
-function readBody(req, res, cb) {
-  let body = '';
-  let size = 0;
-  req.on('data', chunk => {
-    size += chunk.length;
-    if (size > 150 * 1024 * 1024) {
-      req.destroy();
-      res.writeHead(413);
-      res.end('Payload too large');
-    }
-    body += chunk;
-  });
-  req.on('end', () => cb(body));
-}
-
-function jsonReply(res, status, obj) {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(obj));
-}
+const PORT      = 3000;
+const ROOT      = __dirname;
+const DATA_FILE = path.join(ROOT, 'data.json');
 
 // ── MIME types ────────────────────────────────────────────────
 const MIME = {
@@ -90,91 +35,25 @@ const MIME = {
 const server = http.createServer((req, res) => {
   const { pathname } = url.parse(req.url);
 
+  // Allow any device on the LAN to connect
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     res.writeHead(204);
     res.end();
     return;
   }
 
-  // ── POST /api/register ──────────────────────────────────────
-  if (pathname === '/api/register' && req.method === 'POST') {
-    readBody(req, res, body => {
-      try {
-        const { username, password } = JSON.parse(body);
-        if (!username || !password)
-          return jsonReply(res, 400, { error: 'Username and password required' });
-        if (!/^[a-zA-Z0-9_-]{2,32}$/.test(username))
-          return jsonReply(res, 400, { error: 'Username must be 2–32 characters: letters, numbers, _ or -' });
-        if (password.length < 6)
-          return jsonReply(res, 400, { error: 'Password must be at least 6 characters' });
-
-        const users = loadUsers();
-        if (users[username.toLowerCase()])
-          return jsonReply(res, 409, { error: 'Username already taken' });
-
-        const salt = crypto.randomBytes(16).toString('hex');
-        const hash = hashPassword(password, salt);
-        users[username.toLowerCase()] = { username, salt, hash };
-        saveUsers(users);
-
-        const token = genToken();
-        sessions.set(token, username.toLowerCase());
-        jsonReply(res, 200, { token, username });
-      } catch (_) {
-        jsonReply(res, 400, { error: 'Invalid request' });
-      }
-    });
-    return;
-  }
-
-  // ── POST /api/login ─────────────────────────────────────────
-  if (pathname === '/api/login' && req.method === 'POST') {
-    readBody(req, res, body => {
-      try {
-        const { username, password } = JSON.parse(body);
-        if (!username || !password)
-          return jsonReply(res, 400, { error: 'Username and password required' });
-
-        const users = loadUsers();
-        const user  = users[username.toLowerCase()];
-        if (!user || hashPassword(password, user.salt) !== user.hash)
-          return jsonReply(res, 401, { error: 'Invalid username or password' });
-
-        const token = genToken();
-        sessions.set(token, username.toLowerCase());
-        jsonReply(res, 200, { token, username: user.username });
-      } catch (_) {
-        jsonReply(res, 400, { error: 'Invalid request' });
-      }
-    });
-    return;
-  }
-
-  // ── POST /api/logout ────────────────────────────────────────
-  if (pathname === '/api/logout' && req.method === 'POST') {
-    const h = req.headers['authorization'] || '';
-    const m = h.match(/^Bearer (.+)$/);
-    if (m) sessions.delete(m[1]);
-    jsonReply(res, 200, { ok: true });
-    return;
-  }
-
-  // ── GET /api/data  (load this user's data) ──────────────────
+  // ── GET /api/data  (load all app data) ──────────────────────
   if (pathname === '/api/data' && req.method === 'GET') {
-    const user = getAuthUser(req);
-    if (!user) return jsonReply(res, 401, { error: 'Not authenticated' });
-
-    const file = dataFile(user);
-    if (!fs.existsSync(file)) {
+    if (!fs.existsSync(DATA_FILE)) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end('{}');
       return;
     }
-    fs.readFile(file, 'utf8', (err, raw) => {
+    fs.readFile(DATA_FILE, 'utf8', (err, raw) => {
       if (err) { res.writeHead(500); res.end('{}'); return; }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(raw);
@@ -182,19 +61,29 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // ── POST /api/data  (save this user's data) ─────────────────
+  // ── POST /api/data  (save all app data) ─────────────────────
   if (pathname === '/api/data' && req.method === 'POST') {
-    const user = getAuthUser(req);
-    if (!user) return jsonReply(res, 401, { error: 'Not authenticated' });
-
-    readBody(req, res, body => {
+    let body = '';
+    let size = 0;
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > 150 * 1024 * 1024) {   // 150 MB safety limit
+        req.destroy();
+        res.writeHead(413);
+        res.end('Payload too large');
+        return;
+      }
+      body += chunk;
+    });
+    req.on('end', () => {
       try {
         JSON.parse(body); // validate before writing
-        fs.writeFile(dataFile(user), body, 'utf8', err => {
+        fs.writeFile(DATA_FILE, body, 'utf8', err => {
           if (err) { res.writeHead(500); res.end('Write error'); return; }
-          jsonReply(res, 200, { ok: true });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('{"ok":true}');
         });
-      } catch (_) {
+      } catch (e) {
         res.writeHead(400);
         res.end('Invalid JSON');
       }
@@ -204,6 +93,7 @@ const server = http.createServer((req, res) => {
 
   // ── Static files (index.html, etc.) ─────────────────────────
   let filePath = (pathname === '/' || pathname === '') ? '/index.html' : pathname;
+  // Basic path-traversal prevention
   filePath = path.join(ROOT, filePath.replace(/\.\./g, ''));
 
   fs.readFile(filePath, (err, data) => {
@@ -221,6 +111,7 @@ const server = http.createServer((req, res) => {
 
 // ── Start ─────────────────────────────────────────────────────
 server.listen(PORT, '0.0.0.0', () => {
+  // Find the first non-loopback IPv4 address
   let localIp = 'YOUR-PC-IP';
   for (const ifaces of Object.values(os.networkInterfaces())) {
     for (const iface of ifaces) {
@@ -234,16 +125,15 @@ server.listen(PORT, '0.0.0.0', () => {
 
   const line = '─'.repeat(48);
   console.log('');
-  console.log('  Common Cents — Multi-User Server');
+  console.log('  Common Cents — Local Network Server');
   console.log('  ' + line);
   console.log(`  This PC  :  http://localhost:${PORT}`);
   console.log(`  Network  :  http://${localIp}:${PORT}`);
   console.log('  ' + line);
-  console.log('  Each user logs in with their own account.');
-  console.log('  User data is stored separately per user.');
+  console.log('  Open the Network URL on any phone, tablet, or');
+  console.log('  computer connected to the same Wi-Fi.');
   console.log('');
-  console.log('  User data :  data-{username}.json  (in this folder)');
-  console.log('  Accounts  :  users.json  (in this folder)');
+  console.log('  Data file :  data.json  (in this folder)');
   console.log('  Press Ctrl+C to stop the server.');
   console.log('');
 });
