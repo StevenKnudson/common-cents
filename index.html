@@ -244,9 +244,12 @@ let db = {
 let _serverMode = false;
 
 // Cloud sync via GitHub Gist (credentials stored in localStorage only, never in code)
-let _cloudMode   = false;
-let _cloudPAT    = localStorage.getItem('cc_cloud_pat')     || '';
-let _cloudGistId = localStorage.getItem('cc_cloud_gist_id') || '';
+let _cloudMode          = false;
+let _cloudPAT           = localStorage.getItem('cc_cloud_pat')     || '';
+let _cloudGistId        = localStorage.getItem('cc_cloud_gist_id') || '';
+let _lastCloudUpdatedAt = ''; // tracks gist updated_at to detect remote changes
+let _lastSaveTime       = 0;  // ms timestamp of last local save, used to avoid overwriting a just-saved state
+let _syncInterval       = null;
 
 async function loadDB() {
   // ── 1. Cloud (GitHub Gist) — highest priority ────────────────
@@ -285,6 +288,7 @@ async function loadDB() {
           if (raw) {
             db = JSON.parse(raw);
             _cloudMode = true;
+            _lastCloudUpdatedAt = gist.updated_at || '';
             localStorage.setItem('cc_data_v2', raw); // local cache for offline fallback
             return;
           }
@@ -335,6 +339,7 @@ function saveDB() {
 
   if (_cloudMode && _cloudPAT && _cloudGistId) {
     // Cloud sync — fire-and-forget (local cache already written above)
+    _lastSaveTime = Date.now();
     fetch(`https://api.github.com/gists/${_cloudGistId}`, {
       method: 'PATCH',
       headers: {
@@ -1563,6 +1568,7 @@ async function connectCloud() {
     _cloudPAT    = pat;
     _cloudGistId = resolvedId;
     _cloudMode   = true;
+    startCloudPolling();
     _serverMode  = false;
 
     // Use cloud data if it exists
@@ -1586,6 +1592,7 @@ async function connectCloud() {
 
 function disconnectCloud() {
   if (!confirm('Disconnect cloud sync on this device?\n\nYour local data and the cloud gist are kept — nothing is deleted.')) return;
+  stopCloudPolling();
   localStorage.removeItem('cc_cloud_pat');
   localStorage.removeItem('cc_cloud_gist_id');
   _cloudPAT    = '';
@@ -1595,16 +1602,58 @@ function disconnectCloud() {
   updateSyncBadge();
 }
 
-function updateSyncBadge() {
+function updateSyncBadge(syncing = false) {
   const badge = document.getElementById('sync-badge');
   if (!badge) return;
   if (_cloudMode) {
-    badge.innerHTML = '<span style="display:inline-flex;align-items:center;gap:4px;background:#eff6ff;color:#1d4ed8;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;" title="Cloud sync active — click to manage" onclick="showCloudSettings()">☁️ Cloud</span>';
+    const label = syncing ? '☁️ Syncing…' : '☁️ Cloud';
+    badge.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;background:#eff6ff;color:#1d4ed8;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;" title="Cloud sync active — click to manage" onclick="showCloudSettings()">${label}</span>`;
   } else if (_serverMode) {
     badge.innerHTML = '<span style="display:inline-flex;align-items:center;gap:4px;background:#d1fae5;color:#059669;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;" title="Data shared across all devices on your network">🌐 Network</span>';
   } else {
     badge.innerHTML = '<span style="display:inline-flex;align-items:center;gap:4px;background:#f1f5f9;color:#64748b;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;" title="Local only — click to set up cloud sync" onclick="showCloudSettings()">💾 Local</span>';
   }
+}
+
+// ── Auto-polling: pull remote changes every 30 s ─────────────
+function startCloudPolling() {
+  stopCloudPolling();
+  _syncInterval = setInterval(pollCloudUpdates, 30000);
+}
+
+function stopCloudPolling() {
+  if (_syncInterval) { clearInterval(_syncInterval); _syncInterval = null; }
+}
+
+async function pollCloudUpdates() {
+  if (!_cloudMode || !_cloudPAT || !_cloudGistId) return;
+  // Skip if we saved within the last 10 s to avoid overwriting a just-uploaded state
+  if (Date.now() - _lastSaveTime < 10000) return;
+
+  updateSyncBadge(true);
+  try {
+    const ctrl = new AbortController();
+    const t    = setTimeout(() => ctrl.abort(), 8000);
+    const res  = await fetch(`https://api.github.com/gists/${_cloudGistId}`, {
+      signal: ctrl.signal,
+      headers: { 'Authorization': `Bearer ${_cloudPAT}`, 'Accept': 'application/vnd.github+json' }
+    });
+    clearTimeout(t);
+    if (!res.ok) { updateSyncBadge(); return; }
+
+    const gist = await res.json();
+    // Only update if the gist was modified after our last known version
+    if (gist.updated_at && gist.updated_at !== _lastCloudUpdatedAt) {
+      const raw = gist.files?.['data.json']?.content;
+      if (raw) {
+        _lastCloudUpdatedAt = gist.updated_at;
+        db = JSON.parse(raw);
+        localStorage.setItem('cc_data_v2', raw);
+        navigate(currentPage); // re-render whatever the user is looking at
+      }
+    }
+  } catch (_) { /* network error — silently ignore */ }
+  updateSyncBadge();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1808,6 +1857,7 @@ document.getElementById('topbar-date').textContent =
 loadDB().then(() => {
   updateSyncBadge();
   renderDashboard();
+  if (_cloudMode) startCloudPolling();
 });
 </script>
 </body>
