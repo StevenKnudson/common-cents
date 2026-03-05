@@ -220,6 +220,9 @@ textarea { resize: vertical; min-height: 70px; }
       <span class="nav-icon">📈</span><span class="nav-label"> Reports</span>
     </div>
     <div class="nav-section">Sales</div>
+    <div class="nav-item" data-section="projects" onclick="navigate('projects')" title="Projects">
+      <span class="nav-icon">🗂️</span><span class="nav-label"> Projects</span>
+    </div>
     <div class="nav-item" data-section="estimates" onclick="navigate('estimates')" title="Estimates">
       <span class="nav-icon">📝</span><span class="nav-label"> Estimates</span>
     </div>
@@ -290,8 +293,9 @@ let db = {
   bills:        [],
   contacts:     [],
   recurring:    [],
+  projects:     [],
   bizInfo: { name: '', address: '', email: '', phone: '' },
-  nextId: { account: 16, transaction: 1, invoice: 1, estimate: 1, bill: 1, contact: 1, recurring: 1 }
+  nextId: { account: 16, transaction: 1, invoice: 1, estimate: 1, bill: 1, contact: 1, recurring: 1, project: 1 }
 };
 
 function ensureDbFields() {
@@ -303,6 +307,8 @@ function ensureDbFields() {
   if (!db.nextId.bill)      db.nextId.bill      = 1;
   if (!db.nextId.contact)   db.nextId.contact   = 1;
   if (!db.nextId.recurring) db.nextId.recurring = 1;
+  if (!db.projects)         db.projects         = [];
+  if (!db.nextId.project)   db.nextId.project   = 1;
 }
 
 // true when the app is being served by server.js (network mode)
@@ -534,6 +540,7 @@ const PAGE_TITLES = {
   transactions: 'Transactions',
   invoices:     'Invoices',
   reports:      'Reports',
+  projects:     'Projects',
   estimates:    'Estimates',
   bills:        'Bills',
   contacts:     'Contacts',
@@ -557,7 +564,7 @@ function navigate(section) {
   document.getElementById('topbar-title').textContent = PAGE_TITLES[section] || section;
   const renders = {
     dashboard: renderDashboard, accounts: renderAccounts, transactions: renderTransactions,
-    invoices: renderInvoices, reports: renderReports, estimates: renderEstimates,
+    invoices: renderInvoices, reports: renderReports, projects: renderProjects, estimates: renderEstimates,
     bills: renderBills, contacts: renderContacts, recurring: renderRecurring, import: renderImport
   };
   if (renders[section]) renders[section]();
@@ -900,6 +907,13 @@ function showAddTransaction() {
             <input type="number" id="t-amount" placeholder="0.00" min="0.01" step="0.01">
           </div>
           <div class="form-group">
+            <label>Project <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label>
+            <select id="t-project">
+              <option value="">— No project —</option>
+              ${(db.projects||[]).filter(p=>p.status==='active').map(p=>`<option value="${p.id}">${escHtml(p.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
             <label>Receipt <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label>
             <div class="receipt-upload" onclick="document.getElementById('t-receipt').click()" id="t-receipt-zone">
               <div class="receipt-upload-text" id="t-receipt-text">📎 <strong>Click to upload</strong> a receipt image or PDF</div>
@@ -956,7 +970,8 @@ function addTransaction() {
   if (isNaN(amount) || amount <= 0) return alert('Please enter a valid amount.');
   if (type === 'transfer' && fromId === toId) return alert('Transfer accounts must be different.');
 
-  const txData = { id: nextId('transaction'), date, type, description: desc, amount, fromAccountId: fromId, toAccountId: toId };
+  const projId = parseInt(document.getElementById('t-project')?.value) || null;
+  const txData = { id: nextId('transaction'), date, type, description: desc, amount, fromAccountId: fromId, toAccountId: toId, ...(projId ? { projectId: projId } : {}) };
 
   const fileInput = document.getElementById('t-receipt');
   const file = fileInput && fileInput.files[0];
@@ -1083,6 +1098,15 @@ function showAddInvoice() {
               <input type="date" id="i-due">
             </div>
           </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Project <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label>
+              <select id="i-project">
+                <option value="">— No project —</option>
+                ${(db.projects||[]).filter(p=>p.status==='active').map(p=>`<option value="${p.id}">${escHtml(p.name)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
 
           <div class="form-group">
             <label>Line Items</label>
@@ -1196,6 +1220,7 @@ function saveInvoice() {
   const due    = document.getElementById('i-due').value;
   const notes   = document.getElementById('i-notes').value.trim();
   const taxRate = parseFloat(document.getElementById('i-taxrate')?.value) || 0;
+  const projId  = parseInt(document.getElementById('i-project')?.value) || null;
   const items   = getInvItems();
 
   if (!client) return alert('Please enter a client name.');
@@ -1203,7 +1228,7 @@ function saveInvoice() {
   if (items.length === 0) return alert('Please add at least one line item.');
   if (items.some(i => !i.desc)) return alert('All line items need a description.');
 
-  db.invoices.push({ id: nextId('invoice'), client, clientEmail: email, date, dueDate: due, items, taxRate, status: 'draft', notes });
+  db.invoices.push({ id: nextId('invoice'), client, clientEmail: email, date, dueDate: due, items, taxRate, status: 'draft', notes, ...(projId ? { projectId: projId } : {}) });
   saveDB();
   closeModal();
   renderInvoices();
@@ -1992,6 +2017,244 @@ ${inv.notes ? `<div class="notes"><div class="notes-lbl">Notes &amp; Terms</div>
   if (!w) { alert('Pop-ups are blocked.\nPlease allow pop-ups for this page, then try again.'); return; }
   w.document.write(html);
   w.document.close();
+}
+
+// ═══════════════════════════════════════════════════════════
+// PROJECTS
+// ═══════════════════════════════════════════════════════════
+
+function projIncome(id) {
+  return db.transactions.filter(t => t.projectId === id && t.type === 'income').reduce((s,t) => s + t.amount, 0);
+}
+function projExpenses(id) {
+  return db.transactions.filter(t => t.projectId === id && t.type === 'expense').reduce((s,t) => s + t.amount, 0);
+}
+function projInvoiced(id) {
+  return db.invoices.filter(i => i.projectId === id).reduce((s,i) => s + invTotal(i), 0);
+}
+
+function renderProjects() {
+  const projects = [...db.projects].sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''));
+  document.getElementById('main-content').innerHTML = `
+    <div class="section-header">
+      <div><div class="section-title">Projects</div><div class="section-sub">${projects.length} project${projects.length!==1?'s':''}</div></div>
+      <button class="btn btn-primary" onclick="showAddProject()">+ New Project</button>
+    </div>
+    ${projects.length === 0
+      ? `<div class="card"><div class="empty-state"><div class="empty-icon">🗂️</div><div class="empty-title">No projects yet</div><div class="empty-text">Track income, expenses, and invoices by project or job.</div><button class="btn btn-primary" onclick="showAddProject()">+ New Project</button></div></div>`
+      : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;">
+          ${projects.map(p => {
+            const income   = projIncome(p.id);
+            const expenses = projExpenses(p.id);
+            const invoiced = projInvoiced(p.id);
+            const net      = income - expenses;
+            const budgetPct = p.budget ? Math.min(100, Math.round((expenses / p.budget) * 100)) : null;
+            const statusColor = { active:'#059669', completed:'#1d4ed8', cancelled:'#dc2626' }[p.status] || '#64748b';
+            return `<div class="card" style="cursor:default;">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+                <div>
+                  <div style="font-size:15px;font-weight:700;color:#1e293b;">${escHtml(p.name)}</div>
+                  ${p.client ? `<div style="font-size:12px;color:#64748b;margin-top:2px;">👤 ${escHtml(p.client)}</div>` : ''}
+                </div>
+                <span class="badge" style="background:${statusColor}22;color:${statusColor};">${p.status}</span>
+              </div>
+              ${p.description ? `<div style="font-size:13px;color:#64748b;margin-bottom:12px;">${escHtml(p.description)}</div>` : ''}
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
+                <div style="background:#f8fafc;border-radius:8px;padding:8px 10px;">
+                  <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:600;margin-bottom:3px;">Invoiced</div>
+                  <div style="font-weight:700;color:#1d4ed8;font-size:13px;">${fmt(invoiced)}</div>
+                </div>
+                <div style="background:#f8fafc;border-radius:8px;padding:8px 10px;">
+                  <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:600;margin-bottom:3px;">Expenses</div>
+                  <div style="font-weight:700;color:#dc2626;font-size:13px;">${fmt(expenses)}</div>
+                </div>
+                <div style="background:#f8fafc;border-radius:8px;padding:8px 10px;">
+                  <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:600;margin-bottom:3px;">Net</div>
+                  <div style="font-weight:700;color:${net>=0?'#059669':'#dc2626'};font-size:13px;">${fmt(net)}</div>
+                </div>
+              </div>
+              ${budgetPct !== null ? `
+                <div style="margin-bottom:12px;">
+                  <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:4px;">
+                    <span>Budget Used</span><span>${fmt(expenses)} / ${fmt(p.budget)} (${budgetPct}%)</span>
+                  </div>
+                  <div class="aging-bar"><div class="aging-fill" style="width:${budgetPct}%;background:${budgetPct>90?'#dc2626':budgetPct>70?'#d97706':'#059669'};"></div></div>
+                </div>` : ''}
+              ${(p.startDate||p.endDate) ? `<div style="font-size:11px;color:#94a3b8;margin-bottom:10px;">${p.startDate?'Start: '+fmtDate(p.startDate):''}${p.startDate&&p.endDate?' · ':''}${p.endDate?'End: '+fmtDate(p.endDate):''}</div>` : ''}
+              <div style="display:flex;gap:6px;">
+                <button class="btn btn-sm btn-secondary" style="flex:1;" onclick="viewProject(${p.id})">View Details</button>
+                <button class="btn btn-sm btn-secondary" onclick="editProject(${p.id})">Edit</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteProject(${p.id})">Delete</button>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`}`;
+}
+
+function showAddProject(prefill) {
+  const p = prefill || {};
+  const customerOpts = db.contacts.filter(c=>c.type==='customer').map(c=>`<option value="${escHtml(c.name)}" ${p.client===c.name?'selected':''}>${escHtml(c.name)}</option>`).join('');
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal modal-lg">
+        <div class="modal-header"><div class="modal-title">${p.id?'Edit':'New'} Project</div><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group" style="grid-column:span 2;">
+              <label>Project Name</label>
+              <input type="text" id="p-name" value="${escHtml(p.name||'')}" placeholder="e.g. Website Redesign for Acme Corp">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Client (optional)</label>
+              <select id="p-client-sel" onchange="if(this.value)document.getElementById('p-client').value=this.value">
+                <option value="">— Select from contacts —</option>
+                ${customerOpts}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Client Name</label>
+              <input type="text" id="p-client" value="${escHtml(p.client||'')}" placeholder="Client or company name">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea id="p-desc" placeholder="Scope of work, deliverables...">${escHtml(p.description||'')}</textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Status</label>
+              <select id="p-status">
+                <option value="active"    ${(p.status||'active')==='active'?'selected':''}>Active</option>
+                <option value="completed" ${p.status==='completed'?'selected':''}>Completed</option>
+                <option value="cancelled" ${p.status==='cancelled'?'selected':''}>Cancelled</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Budget ($) <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label>
+              <input type="number" id="p-budget" value="${p.budget||''}" placeholder="0.00" min="0" step="0.01">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Start Date</label><input type="date" id="p-start" value="${p.startDate||todayStr()}"></div>
+            <div class="form-group"><label>End Date <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label><input type="date" id="p-end" value="${p.endDate||''}"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveProject(${p.id||0})">${p.id?'Save Changes':'Create Project'}</button>
+        </div>
+      </div>
+    </div>`);
+  document.getElementById('p-name').focus();
+}
+
+function saveProject(id) {
+  const name = document.getElementById('p-name').value.trim();
+  if (!name) return alert('Please enter a project name.');
+  const data = {
+    name,
+    client:      document.getElementById('p-client').value.trim(),
+    description: document.getElementById('p-desc').value.trim(),
+    status:      document.getElementById('p-status').value,
+    budget:      parseFloat(document.getElementById('p-budget').value) || null,
+    startDate:   document.getElementById('p-start').value,
+    endDate:     document.getElementById('p-end').value,
+  };
+  if (id) {
+    const p = db.projects.find(x => x.id === id); if (p) Object.assign(p, data);
+  } else {
+    db.projects.push({ id: nextId('project'), ...data });
+  }
+  saveDB(); closeModal(); renderProjects();
+}
+
+function editProject(id) {
+  const p = db.projects.find(x => x.id === id); if (p) showAddProject(p);
+}
+
+function deleteProject(id) {
+  const txCount  = db.transactions.filter(t => t.projectId === id).length;
+  const invCount = db.invoices.filter(i => i.projectId === id).length;
+  const linked = txCount + invCount;
+  const msg = linked
+    ? `This project has ${linked} linked record${linked!==1?'s':''} (transactions/invoices).\nDeleting the project will NOT delete them — they will just lose their project link.\n\nDelete project?`
+    : 'Delete this project?';
+  if (!confirm(msg)) return;
+  db.transactions.forEach(t => { if (t.projectId === id) delete t.projectId; });
+  db.invoices.forEach(i    => { if (i.projectId === id) delete i.projectId; });
+  db.projects = db.projects.filter(p => p.id !== id);
+  saveDB(); renderProjects();
+}
+
+function viewProject(id) {
+  const p = db.projects.find(x => x.id === id); if (!p) return;
+  const txns = db.transactions.filter(t => t.projectId === id).sort((a,b) => b.date.localeCompare(a.date));
+  const invs = db.invoices.filter(i => i.projectId === id).sort((a,b) => b.date.localeCompare(a.date));
+  const income   = projIncome(id);
+  const expenses = projExpenses(id);
+  const invoiced = projInvoiced(id);
+  const net      = income - expenses;
+
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal modal-lg">
+        <div class="modal-header">
+          <div>
+            <div class="modal-title">${escHtml(p.name)}</div>
+            ${p.client ? `<div style="font-size:12px;color:#64748b;margin-top:2px;">👤 ${escHtml(p.client)}</div>` : ''}
+          </div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="stats-grid" style="margin-bottom:16px;">
+            <div class="stat-card"><div class="stat-label">Invoiced</div><div class="stat-value" style="color:#1d4ed8;">${fmt(invoiced)}</div></div>
+            <div class="stat-card"><div class="stat-label">Income</div><div class="stat-value green">${fmt(income)}</div></div>
+            <div class="stat-card"><div class="stat-label">Expenses</div><div class="stat-value red">${fmt(expenses)}</div></div>
+            <div class="stat-card"><div class="stat-label">Net Profit</div><div class="stat-value ${net>=0?'green':'red'}">${fmt(net)}</div></div>
+          </div>
+          ${p.budget ? `<div style="margin-bottom:16px;padding:12px 14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:6px;">
+              <span>Budget</span><span>${fmt(expenses)} spent of ${fmt(p.budget)} (${Math.round((expenses/p.budget)*100)}%)</span>
+            </div>
+            <div class="aging-bar"><div class="aging-fill" style="width:${Math.min(100,Math.round((expenses/p.budget)*100))}%;background:${expenses>p.budget?'#dc2626':expenses/p.budget>0.8?'#d97706':'#059669'};"></div></div>
+          </div>` : ''}
+          ${p.description ? `<p style="font-size:13px;color:#64748b;margin-bottom:16px;">${escHtml(p.description)}</p>` : ''}
+
+          <div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:8px;">Transactions (${txns.length})</div>
+          ${txns.length === 0
+            ? `<p style="font-size:13px;color:#94a3b8;margin-bottom:16px;">No transactions linked to this project yet.</p>`
+            : `<div class="table-wrap" style="margin-bottom:16px;"><table>
+                <thead><tr><th>Date</th><th>Description</th><th>Type</th><th class="text-right">Amount</th></tr></thead>
+                <tbody>${txns.map(t=>`<tr>
+                  <td class="text-muted">${fmtDate(t.date)}</td>
+                  <td>${escHtml(t.description)}</td>
+                  <td><span class="badge badge-${t.type}">${t.type}</span></td>
+                  <td class="fw-600 text-right" style="color:${t.type==='income'?'#059669':'#dc2626'}">${fmt(t.amount)}</td>
+                </tr>`).join('')}</tbody>
+              </table></div>`}
+
+          <div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:8px;">Invoices (${invs.length})</div>
+          ${invs.length === 0
+            ? `<p style="font-size:13px;color:#94a3b8;">No invoices linked to this project yet.</p>`
+            : `<div class="table-wrap"><table>
+                <thead><tr><th>#</th><th>Client</th><th>Date</th><th class="text-right">Amount</th><th>Status</th></tr></thead>
+                <tbody>${invs.map(i=>`<tr>
+                  <td class="text-mono">#${String(i.id).padStart(4,'0')}</td>
+                  <td>${escHtml(i.client)}</td>
+                  <td class="text-muted">${fmtDate(i.date)}</td>
+                  <td class="fw-600 text-right">${fmt(invTotal(i))}</td>
+                  <td><span class="badge badge-${i.status}">${i.status}</span></td>
+                </tr>`).join('')}</tbody>
+              </table></div>`}
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          <button class="btn btn-secondary" onclick="closeModal();editProject(${p.id})">Edit Project</button>
+        </div>
+      </div>
+    </div>`);
 }
 
 // ═══════════════════════════════════════════════════════════
