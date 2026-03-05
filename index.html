@@ -9,15 +9,23 @@
 body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f1f5f9; color: #1e293b; display: flex; height: 100vh; overflow: hidden; }
 
 /* ── Sidebar ── */
-.sidebar { width: 220px; background: #1e293b; color: #94a3b8; display: flex; flex-direction: column; flex-shrink: 0; }
-.sidebar-logo { padding: 20px 18px 16px; font-size: 20px; font-weight: 800; color: #fff; letter-spacing: -0.5px; border-bottom: 1px solid #334155; }
+.sidebar { width: 220px; background: #1e293b; color: #94a3b8; display: flex; flex-direction: column; flex-shrink: 0; transition: width 0.2s ease; overflow: hidden; }
+.sidebar.collapsed { width: 52px; }
+.sidebar-logo { padding: 20px 18px 16px; font-size: 20px; font-weight: 800; color: #fff; letter-spacing: -0.5px; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; white-space: nowrap; }
 .sidebar-logo span { color: #60a5fa; }
 .sidebar-logo small { display: block; font-size: 10px; font-weight: 400; color: #64748b; letter-spacing: 0; margin-top: 2px; }
-.nav-section { padding: 16px 10px 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; }
-.nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; border-radius: 8px; margin: 2px 8px; transition: all 0.15s; font-size: 14px; color: #94a3b8; }
+.sidebar-logo-text { transition: opacity 0.15s; }
+.sidebar.collapsed .sidebar-logo-text { opacity: 0; pointer-events: none; }
+.sidebar-toggle { background: none; border: none; color: #64748b; cursor: pointer; font-size: 16px; padding: 2px 4px; border-radius: 4px; flex-shrink: 0; line-height: 1; transition: color 0.15s; }
+.sidebar-toggle:hover { color: #e2e8f0; }
+.nav-section { padding: 16px 10px 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; white-space: nowrap; transition: opacity 0.15s; }
+.sidebar.collapsed .nav-section { opacity: 0; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; border-radius: 8px; margin: 2px 8px; transition: all 0.15s; font-size: 14px; color: #94a3b8; white-space: nowrap; }
 .nav-item:hover { background: #334155; color: #e2e8f0; }
 .nav-item.active { background: #2563eb; color: #fff; }
-.nav-icon { font-size: 15px; width: 20px; text-align: center; }
+.nav-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
+.nav-label { transition: opacity 0.15s; }
+.sidebar.collapsed .nav-label { opacity: 0; }
 
 /* ── Main ── */
 .main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-width: 0; }
@@ -165,29 +173,29 @@ textarea { resize: vertical; min-height: 70px; }
 <body>
 
 <!-- ══════════════════════════════════════════════════ SIDEBAR -->
-<div class="sidebar">
+<div class="sidebar" id="sidebar">
   <div class="sidebar-logo">
-    Common <span>Cents</span>
-    <small>Accounting</small>
+    <div class="sidebar-logo-text">Common <span>Cents</span><small>Accounting</small></div>
+    <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">&#x2630;</button>
   </div>
   <nav style="padding: 8px 0 16px;">
     <div class="nav-section">Main</div>
-    <div class="nav-item active" data-section="dashboard" onclick="navigate('dashboard')">
-      <span class="nav-icon">📊</span> Dashboard
+    <div class="nav-item active" data-section="dashboard" onclick="navigate('dashboard')" title="Dashboard">
+      <span class="nav-icon">📊</span><span class="nav-label"> Dashboard</span>
     </div>
     <div class="nav-section">Accounting</div>
-    <div class="nav-item" data-section="accounts" onclick="navigate('accounts')">
-      <span class="nav-icon">🏦</span> Accounts
+    <div class="nav-item" data-section="accounts" onclick="navigate('accounts')" title="Accounts">
+      <span class="nav-icon">🏦</span><span class="nav-label"> Accounts</span>
     </div>
-    <div class="nav-item" data-section="transactions" onclick="navigate('transactions')">
-      <span class="nav-icon">💸</span> Transactions
+    <div class="nav-item" data-section="transactions" onclick="navigate('transactions')" title="Transactions">
+      <span class="nav-icon">💸</span><span class="nav-label"> Transactions</span>
     </div>
-    <div class="nav-item" data-section="invoices" onclick="navigate('invoices')">
-      <span class="nav-icon">📄</span> Invoices
+    <div class="nav-item" data-section="invoices" onclick="navigate('invoices')" title="Invoices">
+      <span class="nav-icon">📄</span><span class="nav-label"> Invoices</span>
     </div>
     <div class="nav-section">Analysis</div>
-    <div class="nav-item" data-section="reports" onclick="navigate('reports')">
-      <span class="nav-icon">📈</span> Reports
+    <div class="nav-item" data-section="reports" onclick="navigate('reports')" title="Reports">
+      <span class="nav-icon">📈</span><span class="nav-label"> Reports</span>
     </div>
   </nav>
 </div>
@@ -465,6 +473,12 @@ const PAGE_TITLES = {
 };
 
 let currentPage = 'dashboard';
+
+function toggleSidebar() {
+  const s = document.getElementById('sidebar');
+  s.classList.toggle('collapsed');
+  localStorage.setItem('cc_sidebar_collapsed', s.classList.contains('collapsed') ? '1' : '0');
+}
 
 function navigate(section) {
   currentPage = section;
@@ -1855,6 +1869,10 @@ document.getElementById('topbar-date').textContent =
   now.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
 
 // Load data, then render
+if (localStorage.getItem('cc_sidebar_collapsed') === '1') {
+  document.getElementById('sidebar').classList.add('collapsed');
+}
+
 loadDB().then(() => {
   updateSyncBadge();
   renderDashboard();
