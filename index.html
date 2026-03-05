@@ -194,6 +194,25 @@ textarea { resize: vertical; min-height: 70px; }
 </head>
 <body>
 
+<!-- ══════════════════════════════════════════════════ LOGIN -->
+<div id="login-screen" style="position:fixed;inset:0;background:linear-gradient(135deg,#1e293b,#0f172a);display:flex;align-items:center;justify-content:center;z-index:9999;">
+  <div style="background:#fff;border-radius:16px;padding:40px 40px 32px;width:100%;max-width:380px;box-shadow:0 24px 64px rgba(0,0,0,.4);">
+    <div style="font-size:22px;font-weight:800;color:#1e293b;margin-bottom:2px;">Common <span style="color:#2563eb;">Cents</span></div>
+    <div style="font-size:13px;color:#64748b;margin-bottom:28px;">Sign in to your account</div>
+    <div id="login-error" style="background:#fee2e2;color:#dc2626;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px;display:none;"></div>
+    <div class="form-group">
+      <label>Username</label>
+      <input type="text" id="login-user" placeholder="Enter username" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('login-pass').focus()">
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="login-pass" placeholder="Enter password" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:8px;padding:10px;" onclick="login()">Sign In</button>
+    <p style="text-align:center;margin-top:16px;font-size:11px;color:#94a3b8;">Default: <strong>admin</strong> / <strong>admin</strong></p>
+  </div>
+</div>
+
 <!-- ══════════════════════════════════════════════════ SIDEBAR -->
 <div class="sidebar" id="sidebar">
   <div class="sidebar-logo">
@@ -241,6 +260,10 @@ textarea { resize: vertical; min-height: 70px; }
     <div class="nav-item" data-section="import" onclick="navigate('import')" title="Import">
       <span class="nav-icon">⬆️</span><span class="nav-label"> CSV Import</span>
     </div>
+    <div class="nav-section">Settings</div>
+    <div class="nav-item" data-section="users" onclick="navigate('users')" title="Users">
+      <span class="nav-icon">👤</span><span class="nav-label"> Users</span>
+    </div>
   </nav>
 </div>
 
@@ -252,6 +275,11 @@ textarea { resize: vertical; min-height: 70px; }
       <div class="topbar-date" id="topbar-date"></div>
       <span id="sync-badge"></span>
       <button class="btn btn-sm btn-secondary" onclick="showCloudSettings()" title="Set up cloud sync to access your data from any device" style="font-size:11px;">☁️ Cloud Sync</button>
+      <div style="display:flex;align-items:center;gap:6px;background:#f1f5f9;border-radius:20px;padding:3px 12px 3px 4px;">
+        <div id="user-avatar" style="width:26px;height:26px;border-radius:50%;background:#2563eb;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">A</div>
+        <span id="current-user-name" style="font-size:12px;color:#475569;font-weight:500;"></span>
+        <button onclick="logout()" title="Sign out" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0;margin-left:2px;line-height:1;" title="Sign out">&#x2192;</button>
+      </div>
     </div>
   </div>
   <div class="content" id="main-content"></div>
@@ -545,7 +573,8 @@ const PAGE_TITLES = {
   bills:        'Bills',
   contacts:     'Contacts',
   recurring:    'Recurring Transactions',
-  import:       'CSV Import'
+  import:       'CSV Import',
+  users:        'Users'
 };
 
 let currentPage = 'dashboard';
@@ -564,7 +593,7 @@ function navigate(section) {
   document.getElementById('topbar-title').textContent = PAGE_TITLES[section] || section;
   const renders = {
     dashboard: renderDashboard, accounts: renderAccounts, transactions: renderTransactions,
-    invoices: renderInvoices, reports: renderReports, projects: renderProjects, estimates: renderEstimates,
+    invoices: renderInvoices, reports: renderReports, projects: renderProjects, estimates: renderEstimates, users: renderUsers,
     bills: renderBills, contacts: renderContacts, recurring: renderRecurring, import: renderImport
   };
   if (renders[section]) renders[section]();
@@ -758,6 +787,7 @@ function addAccount() {
 }
 
 function deleteAccount(id) {
+  if (!canDelete()) return alert('Only administrators can delete records.');
   const used = db.transactions.some(t => t.fromAccountId === +id || t.toAccountId === +id);
   if (used) return alert('Cannot delete: this account has transactions.');
   if (!confirm('Delete this account? This cannot be undone.')) return;
@@ -959,6 +989,7 @@ function txTypeChange() {
 }
 
 function addTransaction() {
+  if (!canEdit()) return alert('You do not have permission to add transactions.');
   const date   = document.getElementById('t-date').value;
   const type   = document.getElementById('t-type').value;
   const desc   = document.getElementById('t-desc').value.trim();
@@ -997,6 +1028,7 @@ function addTransaction() {
 }
 
 function deleteTransaction(id) {
+  if (!canDelete()) return alert('Only administrators can delete records.');
   if (!confirm('Delete this transaction?')) return;
   db.transactions = db.transactions.filter(t => t.id !== +id);
   saveDB();
@@ -1214,6 +1246,7 @@ function getInvItems() {
 }
 
 function saveInvoice() {
+  if (!canEdit()) return alert('You do not have permission to save invoices.');
   const client = document.getElementById('i-client').value.trim();
   const email  = document.getElementById('i-email').value.trim();
   const date   = document.getElementById('i-date').value;
@@ -1390,6 +1423,7 @@ function paidWithTx(id) {
 }
 
 function deleteInvoice(id) {
+  if (!canDelete()) return alert('Only administrators can delete records.');
   if (!confirm('Delete this invoice?')) return;
   db.invoices = db.invoices.filter(i => i.id !== +id);
   saveDB();
@@ -2151,6 +2185,7 @@ function showAddProject(prefill) {
 }
 
 function saveProject(id) {
+  if (!canEdit()) return alert('You do not have permission to save projects.');
   const name = document.getElementById('p-name').value.trim();
   if (!name) return alert('Please enter a project name.');
   const data = {
@@ -2175,6 +2210,7 @@ function editProject(id) {
 }
 
 function deleteProject(id) {
+  if (!canDelete()) return alert('Only administrators can delete records.');
   const txCount  = db.transactions.filter(t => t.projectId === id).length;
   const invCount = db.invoices.filter(i => i.projectId === id).length;
   const linked = txCount + invCount;
@@ -2324,6 +2360,7 @@ function showAddContact(prefill) {
 }
 
 function saveContact(id) {
+  if (!canEdit()) return alert('You do not have permission to save contacts.');
   const name = document.getElementById('c-name').value.trim();
   if (!name) return alert('Please enter a name.');
   const data = {
@@ -2348,6 +2385,7 @@ function editContact(id) {
 }
 
 function deleteContact(id) {
+  if (!canDelete()) return alert('Only administrators can delete records.');
   if (!confirm('Delete this contact?')) return;
   db.contacts = db.contacts.filter(c => c.id !== id);
   saveDB(); renderContacts();
@@ -2473,6 +2511,7 @@ function recalcEst() {
 }
 
 function saveEstimate() {
+  if (!canEdit()) return alert('You do not have permission to save estimates.');
   const client = document.getElementById('est-client').value.trim();
   const email  = document.getElementById('est-email').value.trim();
   const date   = document.getElementById('est-date').value;
@@ -2539,6 +2578,7 @@ function setEstStatus(id, status) {
 }
 
 function deleteEstimate(id) {
+  if (!canDelete()) return alert('Only administrators can delete records.');
   if (!confirm('Delete this estimate?')) return;
   db.estimates = db.estimates.filter(e => e.id !== +id);
   saveDB(); renderEstimates();
@@ -2645,6 +2685,7 @@ function showAddBill() {
 }
 
 function saveBill() {
+  if (!canEdit()) return alert('You do not have permission to save bills.');
   const vendor = document.getElementById('b-vendor').value.trim();
   const desc   = document.getElementById('b-desc').value.trim();
   const date   = document.getElementById('b-date').value;
@@ -2659,6 +2700,7 @@ function saveBill() {
 }
 
 function deleteBill(id) {
+  if (!canDelete()) return alert('Only administrators can delete records.');
   if (!confirm('Delete this bill?')) return;
   db.bills = db.bills.filter(b => b.id !== +id);
   saveDB(); renderBills();
@@ -3182,17 +3224,226 @@ const now = new Date();
 document.getElementById('topbar-date').textContent =
   now.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
 
-// Load data, then render
+// ═══════════════════════════════════════════════════════════
+// USERS & AUTH
+// ═══════════════════════════════════════════════════════════
+
+const CC_USERS_KEY   = 'cc_users';
+const CC_SESSION_KEY = 'cc_session_user';
+let currentUser = null;
+
+function loadUsers() {
+  try { return JSON.parse(localStorage.getItem(CC_USERS_KEY)) || []; } catch { return []; }
+}
+function saveUsers(users) { localStorage.setItem(CC_USERS_KEY, JSON.stringify(users)); }
+
+function ensureDefaultAdmin() {
+  const users = loadUsers();
+  if (users.length === 0) {
+    saveUsers([{ id: 1, name: 'Admin', username: 'admin', password: 'admin', role: 'admin', created: todayStr() }]);
+  }
+}
+
+function isAdmin()   { return currentUser?.role === 'admin'; }
+function canEdit()   { return currentUser?.role === 'admin' || currentUser?.role === 'accountant'; }
+function canDelete() { return currentUser?.role === 'admin'; }
+
+function setUserUI(user) {
+  document.getElementById('current-user-name').textContent = user.name;
+  document.getElementById('user-avatar').textContent = user.name.charAt(0).toUpperCase();
+}
+
+function login() {
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const user = loadUsers().find(u => u.username === username && u.password === password);
+  if (!user) {
+    const el = document.getElementById('login-error');
+    el.textContent = 'Invalid username or password.';
+    el.style.display = 'block';
+    document.getElementById('login-pass').value = '';
+    document.getElementById('login-pass').focus();
+    return;
+  }
+  currentUser = user;
+  sessionStorage.setItem(CC_SESSION_KEY, JSON.stringify({ id: user.id, username: user.username }));
+  document.getElementById('login-screen').style.display = 'none';
+  setUserUI(user);
+  loadDB().then(() => {
+    updateSyncBadge();
+    checkAndRunRecurring();
+    renderDashboard();
+    if (_cloudMode) startCloudPolling();
+  });
+}
+
+function logout() {
+  if (!confirm('Sign out?')) return;
+  currentUser = null;
+  sessionStorage.removeItem(CC_SESSION_KEY);
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-user').value = '';
+  document.getElementById('login-pass').value = '';
+  document.getElementById('login-error').style.display = 'none';
+  document.getElementById('main-content').innerHTML = '';
+  setTimeout(() => document.getElementById('login-user').focus(), 50);
+}
+
+function renderUsers() {
+  const users = loadUsers();
+  const roleColor = { admin: '#2563eb', accountant: '#059669', viewer: '#64748b' };
+  const roleDesc  = { admin: 'Full access + user management', accountant: 'Add & edit, no deletes', viewer: 'Read-only' };
+  document.getElementById('main-content').innerHTML = `
+    <div class="section-header">
+      <div><div class="section-title">Users</div><div class="section-sub">${users.length} user${users.length!==1?'s':''}</div></div>
+      ${isAdmin() ? `<button class="btn btn-primary" onclick="showAddUser()">+ New User</button>` : ''}
+    </div>
+    ${!isAdmin() ? `<div class="card"><div style="padding:8px 0;text-align:center;color:#64748b;font-size:13px;">Only administrators can manage users.</div></div>` : ''}
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Created</th><th></th></tr></thead>
+          <tbody>
+            ${users.map(u => `<tr>
+              <td style="font-weight:600;">${escHtml(u.name)}</td>
+              <td class="text-mono">${escHtml(u.username)}</td>
+              <td>
+                <span class="badge" style="background:${roleColor[u.role]}22;color:${roleColor[u.role]};">${u.role}</span>
+                <span style="font-size:11px;color:#94a3b8;margin-left:6px;">${roleDesc[u.role]||''}</span>
+              </td>
+              <td class="text-muted">${fmtDate(u.created||'')}</td>
+              <td style="text-align:right;white-space:nowrap;">
+                ${isAdmin() ? `<button class="btn btn-sm btn-secondary" onclick="showEditUser(${u.id})">Edit</button>` : ''}
+                ${isAdmin() && u.id !== currentUser.id ? `<button class="btn btn-sm btn-danger" style="margin-left:4px;" onclick="deleteUser(${u.id})">Delete</button>` : ''}
+                ${u.id === currentUser.id ? `<span style="font-size:11px;color:#94a3b8;margin-left:8px;">(you)</span>` : ''}
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px;background:#fffbeb;border:1px solid #fde68a;">
+      <p style="font-size:13px;color:#92400e;margin:0;line-height:1.6;">
+        <strong>Roles:</strong>&nbsp;
+        <strong>Admin</strong> — full access including user management &nbsp;·&nbsp;
+        <strong>Accountant</strong> — can add and edit all records, cannot delete or manage users &nbsp;·&nbsp;
+        <strong>Viewer</strong> — read-only access<br>
+        <strong>Note:</strong> Passwords are stored locally and are not encrypted. Do not reuse sensitive passwords.
+      </p>
+    </div>`;
+}
+
+function showAddUser(prefill) {
+  if (!isAdmin()) return alert('Only administrators can manage users.');
+  const u = prefill || {};
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">${u.id ? 'Edit User' : 'New User'}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Full Name</label>
+              <input type="text" id="u-name" value="${escHtml(u.name||'')}" placeholder="Jane Smith">
+            </div>
+            <div class="form-group">
+              <label>Username</label>
+              <input type="text" id="u-username" value="${escHtml(u.username||'')}" placeholder="jsmith" autocomplete="off">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>${u.id ? 'New Password' : 'Password'} ${u.id ? '<span style="font-weight:400;color:#94a3b8;text-transform:none">(leave blank to keep)</span>' : ''}</label>
+              <input type="password" id="u-pass" placeholder="${u.id ? 'Leave blank to keep current' : 'Set a password'}" autocomplete="new-password">
+            </div>
+            <div class="form-group">
+              <label>Role</label>
+              <select id="u-role">
+                <option value="admin"      ${(u.role||'accountant')==='admin'?'selected':''}>Admin — full access</option>
+                <option value="accountant" ${(u.role||'accountant')==='accountant'?'selected':''}>Accountant — add & edit, no deletes</option>
+                <option value="viewer"     ${u.role==='viewer'?'selected':''}>Viewer — read-only</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveUser(${u.id||0})">${u.id ? 'Save Changes' : 'Create User'}</button>
+        </div>
+      </div>
+    </div>`);
+  document.getElementById('u-name').focus();
+}
+
+function showEditUser(id) {
+  const u = loadUsers().find(x => x.id === id); if (u) showAddUser(u);
+}
+
+function saveUser(id) {
+  if (!isAdmin()) return alert('Only administrators can manage users.');
+  const name     = document.getElementById('u-name').value.trim();
+  const username = document.getElementById('u-username').value.trim();
+  const password = document.getElementById('u-pass').value;
+  const role     = document.getElementById('u-role').value;
+  if (!name)     return alert('Please enter a full name.');
+  if (!username) return alert('Please enter a username.');
+  const users = loadUsers();
+  const dupe = users.find(u => u.username === username && u.id !== id);
+  if (dupe) return alert(`Username "${username}" is already taken.`);
+  if (id) {
+    const u = users.find(x => x.id === id); if (!u) return;
+    u.name = name; u.username = username; u.role = role;
+    if (password) u.password = password;
+    // Keep current session in sync if editing self
+    if (currentUser.id === id) { currentUser = u; setUserUI(u); sessionStorage.setItem(CC_SESSION_KEY, JSON.stringify({ id: u.id, username: u.username })); }
+  } else {
+    if (!password) return alert('Please set a password for the new user.');
+    users.push({ id: Math.max(0, ...users.map(u => u.id)) + 1, name, username, password, role, created: todayStr() });
+  }
+  saveUsers(users); closeModal(); renderUsers();
+}
+
+function deleteUser(id) {
+  if (!isAdmin()) return alert('Only administrators can manage users.');
+  if (id === currentUser.id) return alert('You cannot delete your own account.');
+  const u = loadUsers().find(x => x.id === id); if (!u) return;
+  if (!confirm(`Delete user "${u.name}"? This cannot be undone.`)) return;
+  saveUsers(loadUsers().filter(x => x.id !== id));
+  renderUsers();
+}
+
+// ══════════════════════════════════════════════════════════
+// APP INIT
+// ══════════════════════════════════════════════════════════
+
 if (localStorage.getItem('cc_sidebar_collapsed') === '1') {
   document.getElementById('sidebar').classList.add('collapsed');
 }
 
-loadDB().then(() => {
-  updateSyncBadge();
-  checkAndRunRecurring();
-  renderDashboard();
-  if (_cloudMode) startCloudPolling();
-});
+ensureDefaultAdmin();
+
+(function initSession() {
+  const raw = sessionStorage.getItem(CC_SESSION_KEY);
+  if (!raw) return; // show login screen (already visible by default)
+  try {
+    const stub  = JSON.parse(raw);
+    const users = loadUsers();
+    const valid = users.find(u => u.id === stub.id && u.username === stub.username);
+    if (!valid) return;
+    currentUser = valid;
+    setUserUI(valid);
+    document.getElementById('login-screen').style.display = 'none';
+    loadDB().then(() => {
+      updateSyncBadge();
+      checkAndRunRecurring();
+      renderDashboard();
+      if (_cloudMode) startCloudPolling();
+    });
+  } catch { /* invalid session, stay on login */ }
+})();
 </script>
 </body>
 </html>
