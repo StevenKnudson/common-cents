@@ -90,7 +90,29 @@ tbody tr:hover td { background: #f8fafc; }
 .badge-draft { background: #f1f5f9; color: #64748b; }
 .badge-sent { background: #dbeafe; color: #1d4ed8; }
 .badge-paid { background: #d1fae5; color: #059669; }
-.badge-overdue { background: #fee2e2; color: #dc2626; }
+.badge-overdue   { background: #fee2e2; color: #dc2626; }
+.badge-accepted  { background: #d1fae5; color: #065f46; }
+.badge-declined  { background: #fee2e2; color: #991b1b; }
+.badge-expired   { background: #f1f5f9; color: #64748b; }
+.badge-unpaid    { background: #fef3c7; color: #92400e; }
+.badge-customer  { background: #dbeafe; color: #1e40af; }
+.badge-vendor    { background: #f3e8ff; color: #6b21a8; }
+
+/* ── Filter bar ── */
+.filter-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; padding: 12px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+.filter-input { height: 32px; padding: 0 10px; border: 1.5px solid #e2e8f0; border-radius: 6px; font-size: 13px; color: #1e293b; background: #fff; width: auto; }
+.filter-input:focus { outline: none; border-color: #2563eb; }
+.filter-search { min-width: 180px; }
+
+/* ── Report tabs ── */
+.report-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
+.report-tab { padding: 6px 14px; border-radius: 6px; border: 1.5px solid #e2e8f0; background: #fff; font-size: 13px; font-weight: 500; color: #475569; cursor: pointer; transition: all 0.15s; }
+.report-tab:hover { background: #f1f5f9; }
+.report-tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+/* ── Aging table ── */
+.aging-bar { height: 6px; border-radius: 3px; background: #e2e8f0; margin-top: 4px; }
+.aging-fill { height: 100%; border-radius: 3px; }
 
 /* ── Modal ── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(2px); }
@@ -197,6 +219,25 @@ textarea { resize: vertical; min-height: 70px; }
     <div class="nav-item" data-section="reports" onclick="navigate('reports')" title="Reports">
       <span class="nav-icon">📈</span><span class="nav-label"> Reports</span>
     </div>
+    <div class="nav-section">Sales</div>
+    <div class="nav-item" data-section="estimates" onclick="navigate('estimates')" title="Estimates">
+      <span class="nav-icon">📝</span><span class="nav-label"> Estimates</span>
+    </div>
+    <div class="nav-section">Payables</div>
+    <div class="nav-item" data-section="bills" onclick="navigate('bills')" title="Bills">
+      <span class="nav-icon">🧾</span><span class="nav-label"> Bills</span>
+    </div>
+    <div class="nav-section">Contacts</div>
+    <div class="nav-item" data-section="contacts" onclick="navigate('contacts')" title="Contacts">
+      <span class="nav-icon">👥</span><span class="nav-label"> Contacts</span>
+    </div>
+    <div class="nav-section">Tools</div>
+    <div class="nav-item" data-section="recurring" onclick="navigate('recurring')" title="Recurring">
+      <span class="nav-icon">🔄</span><span class="nav-label"> Recurring</span>
+    </div>
+    <div class="nav-item" data-section="import" onclick="navigate('import')" title="Import">
+      <span class="nav-icon">⬆️</span><span class="nav-label"> CSV Import</span>
+    </div>
   </nav>
 </div>
 
@@ -242,12 +283,27 @@ const DEFAULT_ACCOUNTS = [
 ];
 
 let db = {
-  accounts: JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS)),
-  transactions: [],  // { id, date, type, description, amount, fromAccountId, toAccountId }
-  invoices: [],      // { id, client, clientEmail, date, dueDate, items:[{desc,qty,rate}], status, notes }
+  accounts:     JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS)),
+  transactions: [],
+  invoices:     [],
+  estimates:    [],
+  bills:        [],
+  contacts:     [],
+  recurring:    [],
   bizInfo: { name: '', address: '', email: '', phone: '' },
-  nextId: { account: 16, transaction: 1, invoice: 1 }
+  nextId: { account: 16, transaction: 1, invoice: 1, estimate: 1, bill: 1, contact: 1, recurring: 1 }
 };
+
+function ensureDbFields() {
+  if (!db.estimates)  db.estimates  = [];
+  if (!db.bills)      db.bills      = [];
+  if (!db.contacts)   db.contacts   = [];
+  if (!db.recurring)  db.recurring  = [];
+  if (!db.nextId.estimate)  db.nextId.estimate  = 1;
+  if (!db.nextId.bill)      db.nextId.bill      = 1;
+  if (!db.nextId.contact)   db.nextId.contact   = 1;
+  if (!db.nextId.recurring) db.nextId.recurring = 1;
+}
 
 // true when the app is being served by server.js (network mode)
 let _serverMode = false;
@@ -296,6 +352,7 @@ async function loadDB() {
           const raw  = gist.files?.['data.json']?.content;
           if (raw) {
             db = JSON.parse(raw);
+            ensureDbFields();
             _cloudMode = true;
             _lastCloudUpdatedAt = gist.updated_at || '';
             localStorage.setItem('cc_data_v2', raw); // local cache for offline fallback
@@ -319,6 +376,7 @@ async function loadDB() {
 
       if (data && data.accounts && data.accounts.length > 0) {
         db = data;
+        ensureDbFields();
         return;
       }
 
@@ -337,7 +395,7 @@ async function loadDB() {
   // ── 3. localStorage fallback ─────────────────────────────────
   try {
     const raw = localStorage.getItem('cc_data_v2');
-    if (raw) db = JSON.parse(raw);
+    if (raw) { db = JSON.parse(raw); ensureDbFields(); }
   } catch (_) { /* keep defaults */ }
 }
 
@@ -429,8 +487,14 @@ const totalAssets   = () => sumByType('asset');
 const totalLiab     = () => sumByType('liability');
 const totalEquity   = () => sumByType('equity');
 
-function invTotal(inv) {
+function invSubtotal(inv) {
   return (inv.items || []).reduce((s, i) => s + (i.qty * i.rate), 0);
+}
+function invTaxAmt(inv) {
+  return invSubtotal(inv) * ((inv.taxRate || 0) / 100);
+}
+function invTotal(inv) {
+  return invSubtotal(inv) + invTaxAmt(inv);
 }
 function invPending() {
   return db.invoices.filter(i => ['draft','sent','overdue'].includes(i.status))
@@ -465,11 +529,16 @@ function overlayClick(e) {
 // ═══════════════════════════════════════════════════════════
 
 const PAGE_TITLES = {
-  dashboard: 'Dashboard',
-  accounts: 'Chart of Accounts',
+  dashboard:    'Dashboard',
+  accounts:     'Chart of Accounts',
   transactions: 'Transactions',
-  invoices: 'Invoices',
-  reports: 'Reports'
+  invoices:     'Invoices',
+  reports:      'Reports',
+  estimates:    'Estimates',
+  bills:        'Bills',
+  contacts:     'Contacts',
+  recurring:    'Recurring Transactions',
+  import:       'CSV Import'
 };
 
 let currentPage = 'dashboard';
@@ -486,7 +555,11 @@ function navigate(section) {
     el.classList.toggle('active', el.dataset.section === section);
   });
   document.getElementById('topbar-title').textContent = PAGE_TITLES[section] || section;
-  const renders = { dashboard: renderDashboard, accounts: renderAccounts, transactions: renderTransactions, invoices: renderInvoices, reports: renderReports };
+  const renders = {
+    dashboard: renderDashboard, accounts: renderAccounts, transactions: renderTransactions,
+    invoices: renderInvoices, reports: renderReports, estimates: renderEstimates,
+    bills: renderBills, contacts: renderContacts, recurring: renderRecurring, import: renderImport
+  };
   if (renders[section]) renders[section]();
 }
 
@@ -524,6 +597,10 @@ function renderDashboard() {
       <div class="stat-card">
         <div class="stat-label">Invoices Collected</div>
         <div class="stat-value green">${fmt(invCollected())}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Bills Unpaid</div>
+        <div class="stat-value red">${fmt((db.bills||[]).filter(b=>b.status==='unpaid').reduce((s,b)=>s+b.amount,0))}</div>
       </div>
     </div>
 
@@ -686,50 +763,91 @@ function deleteAccount(id) {
 // TRANSACTIONS
 // ═══════════════════════════════════════════════════════════
 
-function renderTransactions() {
-  const txns = [...db.transactions].sort((a,b) => b.date.localeCompare(a.date));
+let _txFilter = { search: '', type: 'all', dateFrom: '', dateTo: '' };
 
+function renderTransactions() {
   document.getElementById('main-content').innerHTML = `
     <div class="section-header">
       <div>
         <div class="section-title">Transactions</div>
-        <div class="section-sub">${txns.length} records</div>
+        <div class="section-sub" id="tx-count"></div>
       </div>
-      <button class="btn btn-primary" onclick="showAddTransaction()">+ Add Transaction</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-sm btn-secondary" onclick="showCSVImport()">⬆ Import CSV</button>
+        <button class="btn btn-primary" onclick="showAddTransaction()">+ Add Transaction</button>
+      </div>
     </div>
-    <div class="card">
-      ${txns.length === 0
-        ? `<div class="empty-state">
-            <div class="empty-icon">💸</div>
-            <div class="empty-title">No transactions yet</div>
-            <div class="empty-text">Record income, expenses, and account transfers.</div>
-            <button class="btn btn-primary" onclick="showAddTransaction()">+ Add Transaction</button>
-          </div>`
-        : `<div class="table-wrap"><table>
-          <thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Account (From)</th><th>Account (To)</th><th class="text-right">Amount</th><th>Receipt</th><th></th></tr></thead>
-          <tbody>
-            ${txns.map(t => {
-              const from = getAccount(t.fromAccountId);
-              const to   = getAccount(t.toAccountId);
-              const color = t.type === 'income' ? '#059669' : t.type === 'expense' ? '#dc2626' : '#4f46e5';
-              const receiptCell = t.receiptData
-                ? `<button class="receipt-badge" onclick="viewReceipt(${t.id})">📎 View</button>`
-                : `<button class="btn btn-xs btn-secondary" onclick="attachReceipt(${t.id})">+ Attach</button>`;
-              return `<tr>
-                <td class="text-muted" style="white-space:nowrap">${fmtDate(t.date)}</td>
-                <td class="fw-600">${escHtml(t.description)}</td>
-                <td><span class="badge badge-${t.type}">${t.type}</span></td>
-                <td class="text-muted">${from ? escHtml(from.name) : '—'}</td>
-                <td class="text-muted">${to   ? escHtml(to.name)   : '—'}</td>
-                <td class="fw-600 text-right" style="color:${color}">${fmt(t.amount)}</td>
-                <td>${receiptCell}</td>
-                <td><button class="btn btn-xs btn-danger" onclick="deleteTransaction(${t.id})">Delete</button></td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table></div>`}
+    <div class="filter-bar">
+      <input class="filter-input filter-search" type="text" placeholder="🔍 Search..." value="${escHtml(_txFilter.search)}"
+        oninput="_txFilter.search=this.value;renderTxTable()">
+      <input class="filter-input" type="date" title="From date" value="${_txFilter.dateFrom}"
+        onchange="_txFilter.dateFrom=this.value;renderTxTable()">
+      <span style="font-size:12px;color:#94a3b8">to</span>
+      <input class="filter-input" type="date" title="To date" value="${_txFilter.dateTo}"
+        onchange="_txFilter.dateTo=this.value;renderTxTable()">
+      <select class="filter-input" onchange="_txFilter.type=this.value;renderTxTable()">
+        <option value="all" ${_txFilter.type==='all'?'selected':''}>All Types</option>
+        <option value="income"   ${_txFilter.type==='income'?'selected':''}>Income</option>
+        <option value="expense"  ${_txFilter.type==='expense'?'selected':''}>Expense</option>
+        <option value="transfer" ${_txFilter.type==='transfer'?'selected':''}>Transfer</option>
+      </select>
+      <button class="btn btn-sm btn-secondary" onclick="_txFilter={search:'',type:'all',dateFrom:'',dateTo:''};renderTransactions()">Clear</button>
     </div>
+    <div class="card" id="tx-table-wrap"></div>
   `;
+  renderTxTable();
+}
+
+function renderTxTable() {
+  let txns = [...db.transactions].sort((a,b) => b.date.localeCompare(a.date));
+
+  if (_txFilter.search)   { const q = _txFilter.search.toLowerCase(); txns = txns.filter(t => t.description.toLowerCase().includes(q)); }
+  if (_txFilter.type !== 'all') txns = txns.filter(t => t.type === _txFilter.type);
+  if (_txFilter.dateFrom) txns = txns.filter(t => t.date >= _txFilter.dateFrom);
+  if (_txFilter.dateTo)   txns = txns.filter(t => t.date <= _txFilter.dateTo);
+
+  const countEl = document.getElementById('tx-count');
+  if (countEl) countEl.textContent = `${txns.length} of ${db.transactions.length} records`;
+
+  const wrap = document.getElementById('tx-table-wrap');
+  if (!wrap) return;
+
+  if (db.transactions.length === 0) {
+    wrap.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">💸</div>
+      <div class="empty-title">No transactions yet</div>
+      <div class="empty-text">Record income, expenses, and account transfers.</div>
+      <button class="btn btn-primary" onclick="showAddTransaction()">+ Add Transaction</button>
+    </div>`;
+    return;
+  }
+  if (txns.length === 0) {
+    wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">No matches</div><div class="empty-text">Try adjusting your filters.</div></div>`;
+    return;
+  }
+  wrap.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>Date</th><th>Description</th><th>Type</th><th>From</th><th>To</th><th class="text-right">Amount</th><th>Receipt</th><th></th></tr></thead>
+    <tbody>
+      ${txns.map(t => {
+        const from  = getAccount(t.fromAccountId);
+        const to    = getAccount(t.toAccountId);
+        const color = t.type === 'income' ? '#059669' : t.type === 'expense' ? '#dc2626' : '#4f46e5';
+        const receiptCell = t.receiptData
+          ? `<button class="receipt-badge" onclick="viewReceipt(${t.id})">📎 View</button>`
+          : `<button class="btn btn-xs btn-secondary" onclick="attachReceipt(${t.id})">+ Attach</button>`;
+        return `<tr>
+          <td class="text-muted" style="white-space:nowrap">${fmtDate(t.date)}</td>
+          <td class="fw-600">${escHtml(t.description)}</td>
+          <td><span class="badge badge-${t.type}">${t.type}</span></td>
+          <td class="text-muted">${from ? escHtml(from.name) : '—'}</td>
+          <td class="text-muted">${to   ? escHtml(to.name)   : '—'}</td>
+          <td class="fw-600 text-right" style="color:${color}">${fmt(t.amount)}</td>
+          <td>${receiptCell}</td>
+          <td><button class="btn btn-xs btn-danger" onclick="deleteTransaction(${t.id})">Delete</button></td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table></div>`;
 }
 
 function buildAccountOptions(types) {
@@ -977,9 +1095,26 @@ function showAddInvoice() {
             <button class="btn btn-sm btn-secondary" style="margin-top:8px" onclick="addInvItem()">+ Add Line Item</button>
           </div>
 
-          <div class="inv-total-row">
-            <span class="total-label">Invoice Total:</span>
-            <span class="total-value" id="inv-grand-total">$0.00</span>
+          <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+            <table style="width:240px;font-size:13px;">
+              <tr>
+                <td style="padding:4px 8px;color:#64748b;">Subtotal</td>
+                <td style="padding:4px 8px;text-align:right;font-weight:600;" id="inv-subtotal">$0.00</td>
+              </tr>
+              <tr>
+                <td style="padding:4px 8px;color:#64748b;">
+                  Tax
+                  <input type="number" id="i-taxrate" value="0" min="0" max="100" step="0.1"
+                    style="width:56px;padding:2px 6px;font-size:12px;display:inline-block;margin-left:4px;"
+                    oninput="recalcInv()" placeholder="0">%
+                </td>
+                <td style="padding:4px 8px;text-align:right;color:#64748b;" id="inv-tax-amt">$0.00</td>
+              </tr>
+              <tr style="border-top:2px solid #e2e8f0;">
+                <td style="padding:6px 8px;font-weight:700;">Total</td>
+                <td style="padding:6px 8px;text-align:right;font-weight:700;font-size:16px;color:#059669;" id="inv-grand-total">$0.00</td>
+              </tr>
+            </table>
           </div>
 
           <hr class="divider">
@@ -1022,7 +1157,7 @@ function removeInvItem(n) {
 }
 
 function recalcInv() {
-  let grand = 0;
+  let sub = 0;
   for (let i = 1; i <= _itemCount; i++) {
     const qtyEl  = document.getElementById(`inv-qty-${i}`);
     const rateEl = document.getElementById(`inv-rate-${i}`);
@@ -1030,10 +1165,13 @@ function recalcInv() {
     if (!qtyEl || !rateEl || !lineEl) continue;
     const line = (parseFloat(qtyEl.value)||0) * (parseFloat(rateEl.value)||0);
     lineEl.textContent = fmt(line);
-    grand += line;
+    sub += line;
   }
-  const el = document.getElementById('inv-grand-total');
-  if (el) el.textContent = fmt(grand);
+  const taxRate = parseFloat(document.getElementById('i-taxrate')?.value) || 0;
+  const taxAmt  = sub * (taxRate / 100);
+  const el = document.getElementById('inv-subtotal'); if (el) el.textContent = fmt(sub);
+  const ta = document.getElementById('inv-tax-amt');  if (ta) ta.textContent = fmt(taxAmt);
+  const gt = document.getElementById('inv-grand-total'); if (gt) gt.textContent = fmt(sub + taxAmt);
 }
 
 function getInvItems() {
@@ -1056,15 +1194,16 @@ function saveInvoice() {
   const email  = document.getElementById('i-email').value.trim();
   const date   = document.getElementById('i-date').value;
   const due    = document.getElementById('i-due').value;
-  const notes  = document.getElementById('i-notes').value.trim();
-  const items  = getInvItems();
+  const notes   = document.getElementById('i-notes').value.trim();
+  const taxRate = parseFloat(document.getElementById('i-taxrate')?.value) || 0;
+  const items   = getInvItems();
 
   if (!client) return alert('Please enter a client name.');
   if (!date)   return alert('Please select an invoice date.');
   if (items.length === 0) return alert('Please add at least one line item.');
   if (items.some(i => !i.desc)) return alert('All line items need a description.');
 
-  db.invoices.push({ id: nextId('invoice'), client, clientEmail: email, date, dueDate: due, items, status: 'draft', notes });
+  db.invoices.push({ id: nextId('invoice'), client, clientEmail: email, date, dueDate: due, items, taxRate, status: 'draft', notes });
   saveDB();
   closeModal();
   renderInvoices();
@@ -1123,6 +1262,14 @@ function viewInvoice(id) {
             <tbody>${itemRows}</tbody>
             <tfoot style="border-top:2px solid #e2e8f0;background:#f8fafc">
               <tr>
+                <td colspan="3" style="padding:8px 14px;text-align:right;color:#64748b">Subtotal</td>
+                <td style="padding:8px 14px;text-align:right;font-weight:600">${fmt(invSubtotal(inv))}</td>
+              </tr>
+              ${inv.taxRate ? `<tr>
+                <td colspan="3" style="padding:8px 14px;text-align:right;color:#64748b">Tax (${inv.taxRate}%)</td>
+                <td style="padding:8px 14px;text-align:right;color:#64748b">${fmt(invTaxAmt(inv))}</td>
+              </tr>` : ''}
+              <tr style="border-top:2px solid #e2e8f0;">
                 <td colspan="3" style="padding:12px 14px;font-weight:700;text-align:right">Total</td>
                 <td style="padding:12px 14px;font-weight:700;font-size:18px;text-align:right;color:#059669">${fmt(total)}</td>
               </tr>
@@ -1228,19 +1375,6 @@ function deleteInvoice(id) {
 // REPORTS
 // ═══════════════════════════════════════════════════════════
 
-function renderReports() {
-  document.getElementById('main-content').innerHTML = `
-    <div class="section-header">
-      <div class="section-title">Financial Reports</div>
-      <button class="btn btn-secondary" onclick="window.print()">🖨 Print</button>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-      ${renderPL()}
-      ${renderBalanceSheet()}
-    </div>
-    <div style="margin-top:16px;">${renderLedger()}</div>
-  `;
-}
 
 function renderPL() {
   const revenues  = db.accounts.filter(a => a.type === 'revenue').sort((a,b) => a.code.localeCompare(b.code));
@@ -1596,8 +1730,7 @@ async function connectCloud() {
 
     closeModal();
     updateSyncBadge();
-    const renders = { dashboard: renderDashboard, accounts: renderAccounts, transactions: renderTransactions, invoices: renderInvoices, reports: renderReports };
-    if (renders[currentPage]) renders[currentPage]();
+    navigate(currentPage);
 
   } catch (err) {
     alert(`Connection failed: ${err.message}\n\nMake sure:\n• The token has the "gist" scope\n• You are connected to the internet`);
@@ -1835,7 +1968,9 @@ tfoot td{padding:13px 14px;}
     </thead>
     <tbody>${itemRows}</tbody>
     <tfoot>
-      <tr>
+      <tr><td colspan="3" style="text-align:right;padding:8px 14px;color:#64748b;font-size:12px;">Subtotal</td><td style="text-align:right;padding:8px 14px;font-weight:600;">${fmt(invSubtotal(inv))}</td></tr>
+      ${inv.taxRate ? `<tr><td colspan="3" style="text-align:right;padding:8px 14px;color:#64748b;font-size:12px;">Tax (${inv.taxRate}%)</td><td style="text-align:right;padding:8px 14px;color:#64748b;">${fmt(invTaxAmt(inv))}</td></tr>` : ''}
+      <tr style="border-top:2px solid #e2e8f0;">
         <td colspan="3" class="total-lbl">Total</td>
         <td class="total-val">${fmt(total)}</td>
       </tr>
@@ -1860,6 +1995,922 @@ ${inv.notes ? `<div class="notes"><div class="notes-lbl">Notes &amp; Terms</div>
 }
 
 // ═══════════════════════════════════════════════════════════
+// CONTACTS
+// ═══════════════════════════════════════════════════════════
+
+function renderContacts() {
+  const contacts = [...db.contacts].sort((a,b) => a.name.localeCompare(b.name));
+  document.getElementById('main-content').innerHTML = `
+    <div class="section-header">
+      <div><div class="section-title">Contacts</div><div class="section-sub">${contacts.length} contact${contacts.length!==1?'s':''}</div></div>
+      <button class="btn btn-primary" onclick="showAddContact()">+ Add Contact</button>
+    </div>
+    <div class="card">
+      ${contacts.length === 0
+        ? `<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">No contacts yet</div><div class="empty-text">Add customers and vendors to keep track of who you work with.</div><button class="btn btn-primary" onclick="showAddContact()">+ Add Contact</button></div>`
+        : `<div class="table-wrap"><table>
+          <thead><tr><th>Name</th><th>Type</th><th>Email</th><th>Phone</th><th></th></tr></thead>
+          <tbody>${contacts.map(c => `<tr>
+            <td class="fw-600">${escHtml(c.name)}</td>
+            <td><span class="badge badge-${c.type}">${c.type}</span></td>
+            <td class="text-muted">${escHtml(c.email||'—')}</td>
+            <td class="text-muted">${escHtml(c.phone||'—')}</td>
+            <td style="text-align:right;display:flex;gap:4px;justify-content:flex-end;">
+              <button class="btn btn-xs btn-secondary" onclick="editContact(${c.id})">Edit</button>
+              <button class="btn btn-xs btn-danger" onclick="deleteContact(${c.id})">Delete</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table></div>`}
+    </div>`;
+}
+
+function showAddContact(prefill) {
+  const c = prefill || {};
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal">
+        <div class="modal-header"><div class="modal-title">${c.id ? 'Edit' : 'Add'} Contact</div><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Type</label>
+              <select id="c-type">
+                <option value="customer" ${(c.type||'customer')==='customer'?'selected':''}>Customer</option>
+                <option value="vendor"   ${c.type==='vendor'?'selected':''}>Vendor</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" id="c-name" value="${escHtml(c.name||'')}" placeholder="Full name or company">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Email</label><input type="email" id="c-email" value="${escHtml(c.email||'')}" placeholder="contact@example.com"></div>
+            <div class="form-group"><label>Phone</label><input type="text" id="c-phone" value="${escHtml(c.phone||'')}" placeholder="(555) 000-0000"></div>
+          </div>
+          <div class="form-group"><label>Address</label><textarea id="c-addr" placeholder="Street, City, State ZIP">${escHtml(c.address||'')}</textarea></div>
+          <div class="form-group"><label>Notes</label><textarea id="c-notes" placeholder="Any notes...">${escHtml(c.notes||'')}</textarea></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveContact(${c.id||0})">${c.id ? 'Save Changes' : 'Add Contact'}</button>
+        </div>
+      </div>
+    </div>`);
+  document.getElementById('c-name').focus();
+}
+
+function saveContact(id) {
+  const name = document.getElementById('c-name').value.trim();
+  if (!name) return alert('Please enter a name.');
+  const data = {
+    type: document.getElementById('c-type').value,
+    name,
+    email:   document.getElementById('c-email').value.trim(),
+    phone:   document.getElementById('c-phone').value.trim(),
+    address: document.getElementById('c-addr').value.trim(),
+    notes:   document.getElementById('c-notes').value.trim()
+  };
+  if (id) {
+    const c = db.contacts.find(x => x.id === id); if (c) Object.assign(c, data);
+  } else {
+    db.contacts.push({ id: nextId('contact'), ...data });
+  }
+  saveDB(); closeModal(); renderContacts();
+}
+
+function editContact(id) {
+  const c = db.contacts.find(x => x.id === id);
+  if (c) showAddContact(c);
+}
+
+function deleteContact(id) {
+  if (!confirm('Delete this contact?')) return;
+  db.contacts = db.contacts.filter(c => c.id !== id);
+  saveDB(); renderContacts();
+}
+
+// ═══════════════════════════════════════════════════════════
+// ESTIMATES
+// ═══════════════════════════════════════════════════════════
+
+function renderEstimates() {
+  const ests = [...db.estimates].sort((a,b) => b.date.localeCompare(a.date));
+  document.getElementById('main-content').innerHTML = `
+    <div class="section-header">
+      <div><div class="section-title">Estimates</div><div class="section-sub">${ests.length} estimate${ests.length!==1?'s':''}</div></div>
+      <button class="btn btn-primary" onclick="showAddEstimate()">+ New Estimate</button>
+    </div>
+    <div class="card">
+      ${ests.length === 0
+        ? `<div class="empty-state"><div class="empty-icon">📝</div><div class="empty-title">No estimates yet</div><div class="empty-text">Create quotes for clients and convert accepted ones to invoices.</div><button class="btn btn-primary" onclick="showAddEstimate()">+ New Estimate</button></div>`
+        : `<div class="table-wrap"><table>
+          <thead><tr><th>#</th><th>Client</th><th>Date</th><th>Expires</th><th class="text-right">Amount</th><th>Status</th><th></th></tr></thead>
+          <tbody>${ests.map(e => {
+            const total = invTotal(e);
+            return `<tr>
+              <td class="text-mono">#EST-${String(e.id).padStart(4,'0')}</td>
+              <td class="fw-600">${escHtml(e.client)}</td>
+              <td class="text-muted">${fmtDate(e.date)}</td>
+              <td class="text-muted">${fmtDate(e.expiryDate)}</td>
+              <td class="fw-600 text-right">${fmt(total)}</td>
+              <td><span class="badge badge-${e.status}">${e.status}</span></td>
+              <td style="display:flex;gap:4px;justify-content:flex-end;">
+                <button class="btn btn-xs btn-secondary" onclick="viewEstimate(${e.id})">View</button>
+                ${e.status==='accepted' ? `<button class="btn btn-xs btn-primary" onclick="convertEstimateToInvoice(${e.id})">→ Invoice</button>` : ''}
+                <button class="btn btn-xs btn-danger" onclick="deleteEstimate(${e.id})">Delete</button>
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>`}
+    </div>`;
+}
+
+let _estItemCount = 0;
+function showAddEstimate() {
+  _estItemCount = 0;
+  const customerOpts = ['<option value="">— Select or type below —</option>',
+    ...db.contacts.filter(c=>c.type==='customer').map(c=>`<option value="${escHtml(c.name)}" data-email="${escHtml(c.email||'')}">${escHtml(c.name)}</option>`)
+  ].join('');
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal modal-lg">
+        <div class="modal-header"><div class="modal-title">New Estimate</div><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Client</label>
+              <select id="est-client-sel" onchange="const o=this.options[this.selectedIndex];if(o.value){document.getElementById('est-client').value=o.value;document.getElementById('est-email').value=o.dataset.email||'';}">
+                ${customerOpts}
+              </select>
+            </div>
+            <div class="form-group"><label>Client Name</label><input type="text" id="est-client" placeholder="Acme Corp"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Client Email</label><input type="email" id="est-email" placeholder="client@example.com"></div>
+            <div class="form-group"><label>Estimate Date</label><input type="date" id="est-date" value="${todayStr()}"></div>
+          </div>
+          <div class="form-group"><label>Expiry Date</label><input type="date" id="est-expiry"></div>
+          <div class="form-group">
+            <label>Line Items</label>
+            <div class="inv-items-table"><table>
+              <thead><tr><th style="width:50%">Description</th><th style="width:15%">Qty</th><th style="width:20%">Rate ($)</th><th style="width:15%">Total</th><th style="width:5%"></th></tr></thead>
+              <tbody id="est-tbody"></tbody>
+            </table></div>
+            <button class="btn btn-sm btn-secondary" style="margin-top:8px" onclick="addEstItem()">+ Add Line Item</button>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+            <table style="width:240px;font-size:13px;">
+              <tr><td style="padding:4px 8px;color:#64748b;">Subtotal</td><td style="padding:4px 8px;text-align:right;font-weight:600;" id="est-subtotal">$0.00</td></tr>
+              <tr><td style="padding:4px 8px;color:#64748b;">Tax <input type="number" id="est-taxrate" value="0" min="0" max="100" step="0.1" style="width:56px;padding:2px 6px;font-size:12px;display:inline-block;margin-left:4px;" oninput="recalcEst()">%</td><td style="padding:4px 8px;text-align:right;color:#64748b;" id="est-tax-amt">$0.00</td></tr>
+              <tr style="border-top:2px solid #e2e8f0;"><td style="padding:6px 8px;font-weight:700;">Total</td><td style="padding:6px 8px;text-align:right;font-weight:700;font-size:16px;color:#059669;" id="est-grand-total">$0.00</td></tr>
+            </table>
+          </div>
+          <hr class="divider">
+          <div class="form-group"><label>Notes</label><textarea id="est-notes" placeholder="Valid for 30 days..."></textarea></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveEstimate()">Create Estimate</button>
+        </div>
+      </div>
+    </div>`);
+  addEstItem();
+  document.getElementById('est-client').focus();
+}
+
+function addEstItem() {
+  _estItemCount++;
+  const n = _estItemCount;
+  const tbody = document.getElementById('est-tbody');
+  const tr = document.createElement('tr');
+  tr.id = `est-row-${n}`;
+  tr.innerHTML = `
+    <td><input type="text" id="est-desc-${n}" placeholder="Service or product"></td>
+    <td><input type="number" id="est-qty-${n}" value="1" min="0" step="any" style="width:100%" oninput="recalcEst()"></td>
+    <td><input type="number" id="est-rate-${n}" value="" min="0" step="0.01" style="width:100%" placeholder="0.00" oninput="recalcEst()"></td>
+    <td id="est-line-${n}" style="padding:8px;font-weight:600;font-size:13px;">$0.00</td>
+    <td style="padding:4px;text-align:center;"><button class="btn btn-xs btn-ghost" onclick="document.getElementById('est-row-${n}').remove();recalcEst()" title="Remove">✕</button></td>`;
+  tbody.appendChild(tr);
+}
+
+function recalcEst() {
+  let sub = 0;
+  for (let i = 1; i <= _estItemCount; i++) {
+    const qEl = document.getElementById(`est-qty-${i}`), rEl = document.getElementById(`est-rate-${i}`), lEl = document.getElementById(`est-line-${i}`);
+    if (!qEl) continue;
+    const line = (parseFloat(qEl.value)||0) * (parseFloat(rEl.value)||0);
+    if (lEl) lEl.textContent = fmt(line);
+    sub += line;
+  }
+  const tax = sub * ((parseFloat(document.getElementById('est-taxrate')?.value)||0)/100);
+  const s=document.getElementById('est-subtotal'); if(s) s.textContent=fmt(sub);
+  const t=document.getElementById('est-tax-amt');  if(t) t.textContent=fmt(tax);
+  const g=document.getElementById('est-grand-total'); if(g) g.textContent=fmt(sub+tax);
+}
+
+function saveEstimate() {
+  const client = document.getElementById('est-client').value.trim();
+  const email  = document.getElementById('est-email').value.trim();
+  const date   = document.getElementById('est-date').value;
+  const expiry = document.getElementById('est-expiry').value;
+  const notes  = document.getElementById('est-notes').value.trim();
+  const taxRate = parseFloat(document.getElementById('est-taxrate').value)||0;
+  const items = [];
+  for (let i = 1; i <= _estItemCount; i++) {
+    const d = document.getElementById(`est-desc-${i}`); if (!d) continue;
+    const desc = d.value.trim(), qty = parseFloat(document.getElementById(`est-qty-${i}`)?.value)||0, rate = parseFloat(document.getElementById(`est-rate-${i}`)?.value)||0;
+    if (desc) items.push({ desc, qty, rate });
+  }
+  if (!client) return alert('Please enter a client name.');
+  if (!date)   return alert('Please select a date.');
+  if (items.length === 0) return alert('Please add at least one line item.');
+  db.estimates.push({ id: nextId('estimate'), client, clientEmail: email, date, expiryDate: expiry, items, taxRate, status: 'draft', notes });
+  saveDB(); closeModal(); renderEstimates();
+}
+
+function viewEstimate(id) {
+  const e = db.estimates.find(x => x.id === +id); if (!e) return;
+  const sub = invSubtotal(e), tax = invTaxAmt(e), total = invTotal(e);
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal modal-lg">
+        <div class="modal-header"><div class="modal-title">Estimate #EST-${String(e.id).padStart(4,'0')}</div><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-body">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+            <div><div class="fw-600" style="font-size:18px;">${escHtml(e.client)}</div>${e.clientEmail?`<div class="text-muted">${escHtml(e.clientEmail)}</div>`:''}</div>
+            <span class="badge badge-${e.status}" style="font-size:13px;padding:6px 14px">${e.status.toUpperCase()}</span>
+          </div>
+          <div style="display:flex;gap:20px;font-size:13px;color:#64748b;margin-bottom:16px;">
+            <span>Date: <strong style="color:#1e293b">${fmtDate(e.date)}</strong></span>
+            ${e.expiryDate?`<span>Expires: <strong style="color:#1e293b">${fmtDate(e.expiryDate)}</strong></span>`:''}
+          </div>
+          <table style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+            <thead style="background:#f8fafc"><tr>
+              <th style="padding:8px 14px;text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;">Description</th>
+              <th style="padding:8px 14px;text-align:center;font-size:11px;color:#64748b;text-transform:uppercase;">Qty</th>
+              <th style="padding:8px 14px;text-align:right;font-size:11px;color:#64748b;text-transform:uppercase;">Rate</th>
+              <th style="padding:8px 14px;text-align:right;font-size:11px;color:#64748b;text-transform:uppercase;">Amount</th>
+            </tr></thead>
+            <tbody>${e.items.map(i=>`<tr><td style="padding:10px 14px">${escHtml(i.desc)}</td><td style="padding:10px 14px;text-align:center">${i.qty}</td><td style="padding:10px 14px;text-align:right">${fmt(i.rate)}</td><td style="padding:10px 14px;text-align:right;font-weight:600">${fmt(i.qty*i.rate)}</td></tr>`).join('')}</tbody>
+            <tfoot style="border-top:2px solid #e2e8f0;background:#f8fafc">
+              <tr><td colspan="3" style="padding:8px 14px;text-align:right;color:#64748b">Subtotal</td><td style="padding:8px 14px;text-align:right;font-weight:600">${fmt(sub)}</td></tr>
+              ${e.taxRate?`<tr><td colspan="3" style="padding:8px 14px;text-align:right;color:#64748b">Tax (${e.taxRate}%)</td><td style="padding:8px 14px;text-align:right;color:#64748b">${fmt(tax)}</td></tr>`:''}
+              <tr><td colspan="3" style="padding:10px 14px;font-weight:700;text-align:right">Total</td><td style="padding:10px 14px;font-weight:700;font-size:18px;text-align:right;color:#059669">${fmt(total)}</td></tr>
+            </tfoot>
+          </table>
+          ${e.notes?`<div style="padding:10px 14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;font-size:13px;color:#64748b"><strong style="color:#475569">Notes:</strong> ${escHtml(e.notes)}</div>`:''}
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          ${e.status==='draft'?`<button class="btn btn-warning" onclick="setEstStatus(${e.id},'sent');closeModal();renderEstimates()">Mark Sent</button>`:''}
+          ${['draft','sent'].includes(e.status)?`<button class="btn btn-success" onclick="setEstStatus(${e.id},'accepted');closeModal();renderEstimates()">Accept</button><button class="btn btn-danger" onclick="setEstStatus(${e.id},'declined');closeModal();renderEstimates()">Decline</button>`:''}
+          ${e.status==='accepted'?`<button class="btn btn-primary" onclick="convertEstimateToInvoice(${e.id})">→ Convert to Invoice</button>`:''}
+        </div>
+      </div>
+    </div>`);
+}
+
+function setEstStatus(id, status) {
+  const e = db.estimates.find(x => x.id === +id); if (e) { e.status = status; saveDB(); }
+}
+
+function deleteEstimate(id) {
+  if (!confirm('Delete this estimate?')) return;
+  db.estimates = db.estimates.filter(e => e.id !== +id);
+  saveDB(); renderEstimates();
+}
+
+function convertEstimateToInvoice(id) {
+  const e = db.estimates.find(x => x.id === +id); if (!e) return;
+  if (!confirm(`Convert estimate #EST-${String(e.id).padStart(4,'0')} to an invoice?`)) return;
+  db.invoices.push({ id: nextId('invoice'), client: e.client, clientEmail: e.clientEmail, date: todayStr(), dueDate: '', items: JSON.parse(JSON.stringify(e.items)), taxRate: e.taxRate||0, status: 'draft', notes: e.notes });
+  e.status = 'accepted';
+  saveDB(); closeModal(); navigate('invoices');
+}
+
+// ═══════════════════════════════════════════════════════════
+// BILLS
+// ═══════════════════════════════════════════════════════════
+
+function renderBills() {
+  const today = todayStr();
+  let changed = false;
+  for (const b of db.bills) {
+    if (b.status === 'unpaid' && b.dueDate && b.dueDate < today) { b.overdue = true; changed = true; }
+    else { b.overdue = false; }
+  }
+  if (changed) saveDB();
+
+  const bills = [...db.bills].sort((a,b) => (a.dueDate||'').localeCompare(b.dueDate||''));
+  const totalUnpaid = db.bills.filter(b=>b.status==='unpaid').reduce((s,b)=>s+b.amount,0);
+  const totalOverdue = db.bills.filter(b=>b.status==='unpaid'&&b.overdue).reduce((s,b)=>s+b.amount,0);
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="section-header">
+      <div><div class="section-title">Bills</div><div class="section-sub">Accounts Payable</div></div>
+      <button class="btn btn-primary" onclick="showAddBill()">+ Enter Bill</button>
+    </div>
+    <div class="stats-grid" style="margin-bottom:16px;">
+      <div class="stat-card"><div class="stat-label">Total Unpaid</div><div class="stat-value amber">${fmt(totalUnpaid)}</div></div>
+      <div class="stat-card"><div class="stat-label">Overdue</div><div class="stat-value red">${fmt(totalOverdue)}</div></div>
+    </div>
+    <div class="card">
+      ${bills.length === 0
+        ? `<div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-title">No bills yet</div><div class="empty-text">Enter bills from vendors to track what you owe.</div><button class="btn btn-primary" onclick="showAddBill()">+ Enter Bill</button></div>`
+        : `<div class="table-wrap"><table>
+          <thead><tr><th>Vendor</th><th>Description</th><th>Bill Date</th><th>Due Date</th><th class="text-right">Amount</th><th>Status</th><th></th></tr></thead>
+          <tbody>${bills.map(b => {
+            const statusLabel = b.status==='paid' ? 'paid' : b.overdue ? 'overdue' : 'unpaid';
+            const statusBadge = b.status==='paid' ? 'paid' : b.overdue ? 'overdue' : 'unpaid';
+            return `<tr>
+              <td class="fw-600">${escHtml(b.vendor)}</td>
+              <td class="text-muted">${escHtml(b.description||'')}</td>
+              <td class="text-muted">${fmtDate(b.date)}</td>
+              <td class="text-muted">${fmtDate(b.dueDate)}</td>
+              <td class="fw-600 text-right">${fmt(b.amount)}</td>
+              <td><span class="badge badge-${statusBadge}">${statusLabel}</span></td>
+              <td style="display:flex;gap:4px;justify-content:flex-end;">
+                ${b.status==='unpaid'?`<button class="btn btn-xs btn-success" onclick="payBill(${b.id})">Pay Bill</button>`:''}
+                <button class="btn btn-xs btn-danger" onclick="deleteBill(${b.id})">Delete</button>
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>`}
+    </div>`;
+}
+
+function showAddBill() {
+  const vendorOpts = ['<option value="">— Type name below —</option>',
+    ...db.contacts.filter(c=>c.type==='vendor').map(c=>`<option value="${escHtml(c.name)}">${escHtml(c.name)}</option>`)
+  ].join('');
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal">
+        <div class="modal-header"><div class="modal-title">Enter Bill</div><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Vendor (from contacts)</label>
+              <select id="b-vendor-sel" onchange="if(this.value)document.getElementById('b-vendor').value=this.value">${vendorOpts}</select>
+            </div>
+            <div class="form-group"><label>Vendor Name</label><input type="text" id="b-vendor" placeholder="Acme Supplies"></div>
+          </div>
+          <div class="form-group"><label>Description</label><input type="text" id="b-desc" placeholder="Monthly rent, Office supplies..."></div>
+          <div class="form-row">
+            <div class="form-group"><label>Bill Date</label><input type="date" id="b-date" value="${todayStr()}"></div>
+            <div class="form-group"><label>Due Date</label><input type="date" id="b-due"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Amount ($)</label>
+              <input type="number" id="b-amount" placeholder="0.00" min="0.01" step="0.01">
+            </div>
+            <div class="form-group">
+              <label>Expense Account</label>
+              <select id="b-cat">${buildAccountOptions(['expense'])}</select>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveBill()">Save Bill</button>
+        </div>
+      </div>
+    </div>`);
+  document.getElementById('b-vendor').focus();
+}
+
+function saveBill() {
+  const vendor = document.getElementById('b-vendor').value.trim();
+  const desc   = document.getElementById('b-desc').value.trim();
+  const date   = document.getElementById('b-date').value;
+  const due    = document.getElementById('b-due').value;
+  const amount = parseFloat(document.getElementById('b-amount').value);
+  const catId  = parseInt(document.getElementById('b-cat').value);
+  if (!vendor) return alert('Please enter a vendor name.');
+  if (!date)   return alert('Please select a bill date.');
+  if (isNaN(amount) || amount <= 0) return alert('Please enter a valid amount.');
+  db.bills.push({ id: nextId('bill'), vendor, description: desc, date, dueDate: due, amount, categoryAccountId: catId, status: 'unpaid' });
+  saveDB(); closeModal(); renderBills();
+}
+
+function deleteBill(id) {
+  if (!confirm('Delete this bill?')) return;
+  db.bills = db.bills.filter(b => b.id !== +id);
+  saveDB(); renderBills();
+}
+
+function payBill(id) {
+  const b = db.bills.find(x => x.id === +id); if (!b) return;
+  const assetOpts = buildAccountOptions(['asset']);
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal">
+        <div class="modal-header"><div class="modal-title">Pay Bill — ${escHtml(b.vendor)}</div><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-body">
+          <p style="font-size:14px;color:#475569;margin-bottom:16px">Record payment of <strong>${fmt(b.amount)}</strong> for: ${escHtml(b.description||b.vendor)}</p>
+          <div class="form-group"><label>Paid From Account</label><select id="bp-asset">${assetOpts}</select></div>
+          <div class="form-group"><label>Payment Date</label><input type="date" id="bp-date" value="${todayStr()}"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-success" onclick="confirmPayBill(${id})">Record Payment</button>
+        </div>
+      </div>
+    </div>`);
+}
+
+function confirmPayBill(id) {
+  const b = db.bills.find(x => x.id === +id); if (!b) return;
+  const assetId = parseInt(document.getElementById('bp-asset').value);
+  const date    = document.getElementById('bp-date').value;
+  if (!date) return alert('Please select a payment date.');
+  db.transactions.push({
+    id: nextId('transaction'), date, type: 'expense',
+    description: `Bill payment — ${b.vendor}${b.description?' ('+b.description+')':''}`,
+    amount: b.amount, fromAccountId: b.categoryAccountId, toAccountId: assetId
+  });
+  b.status = 'paid'; b.paidDate = date; b.paidAccountId = assetId;
+  saveDB(); closeModal(); renderBills();
+}
+
+// ═══════════════════════════════════════════════════════════
+// RECURRING TRANSACTIONS
+// ═══════════════════════════════════════════════════════════
+
+function renderRecurring() {
+  const recs = db.recurring;
+  document.getElementById('main-content').innerHTML = `
+    <div class="section-header">
+      <div><div class="section-title">Recurring Transactions</div><div class="section-sub">${recs.length} rule${recs.length!==1?'s':''}</div></div>
+      <button class="btn btn-primary" onclick="showAddRecurring()">+ Add Rule</button>
+    </div>
+    <div class="card">
+      ${recs.length === 0
+        ? `<div class="empty-state"><div class="empty-icon">🔄</div><div class="empty-title">No recurring rules</div><div class="empty-text">Automate repeating income and expenses like rent, subscriptions, and salaries.</div><button class="btn btn-primary" onclick="showAddRecurring()">+ Add Rule</button></div>`
+        : `<div class="table-wrap"><table>
+          <thead><tr><th>Description</th><th>Type</th><th>Frequency</th><th>Next Date</th><th class="text-right">Amount</th><th>Active</th><th></th></tr></thead>
+          <tbody>${recs.map(r => {
+            const from = getAccount(r.fromAccountId), to = getAccount(r.toAccountId);
+            return `<tr>
+              <td class="fw-600">${escHtml(r.description)}</td>
+              <td><span class="badge badge-${r.type}">${r.type}</span></td>
+              <td class="text-muted">${r.frequency}</td>
+              <td class="text-muted">${fmtDate(r.nextDate)}</td>
+              <td class="fw-600 text-right">${fmt(r.amount)}</td>
+              <td><label style="cursor:pointer;"><input type="checkbox" ${r.active!==false?'checked':''} onchange="toggleRecurring(${r.id},this.checked)" style="width:auto;margin-right:4px;">On</label></td>
+              <td style="display:flex;gap:4px;justify-content:flex-end;">
+                <button class="btn btn-xs btn-secondary" onclick="runRecurringNow(${r.id})">Run Now</button>
+                <button class="btn btn-xs btn-danger" onclick="deleteRecurring(${r.id})">Delete</button>
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>`}
+    </div>`;
+}
+
+function showAddRecurring() {
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal">
+        <div class="modal-header"><div class="modal-title">Add Recurring Transaction</div><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Type</label>
+              <select id="r-type" onchange="recTypeChange()">
+                <option value="income">Income</option>
+                <option value="expense">Expense</option>
+                <option value="transfer">Transfer</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Frequency</label>
+              <select id="r-freq">
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Bi-weekly</option>
+                <option value="monthly" selected>Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group"><label>Description</label><input type="text" id="r-desc" placeholder="e.g. Monthly Rent"></div>
+          <div class="form-row">
+            <div class="form-group"><label id="r-from-label">Revenue Account</label><select id="r-from">${buildAccountOptions(['revenue'])}</select></div>
+            <div class="form-group"><label id="r-to-label">Deposit To</label><select id="r-to">${buildAccountOptions(['asset'])}</select></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Amount ($)</label><input type="number" id="r-amount" placeholder="0.00" min="0.01" step="0.01"></div>
+            <div class="form-group"><label>First / Next Date</label><input type="date" id="r-next" value="${todayStr()}"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveRecurring()">Add Rule</button>
+        </div>
+      </div>
+    </div>`);
+  document.getElementById('r-desc').focus();
+}
+
+function recTypeChange() {
+  const type = document.getElementById('r-type').value;
+  const fl = document.getElementById('r-from-label'), tl = document.getElementById('r-to-label');
+  const fs = document.getElementById('r-from'), ts = document.getElementById('r-to');
+  if (type === 'income')   { fl.textContent='Revenue Account'; fs.innerHTML=buildAccountOptions(['revenue']); tl.textContent='Deposit To'; ts.innerHTML=buildAccountOptions(['asset']); }
+  else if (type === 'expense') { fl.textContent='Expense Category'; fs.innerHTML=buildAccountOptions(['expense']); tl.textContent='Paid From'; ts.innerHTML=buildAccountOptions(['asset']); }
+  else { fl.textContent='Transfer From'; fs.innerHTML=buildAccountOptions(['asset']); tl.textContent='Transfer To'; ts.innerHTML=buildAccountOptions(['asset']); }
+}
+
+function saveRecurring() {
+  const desc   = document.getElementById('r-desc').value.trim();
+  const type   = document.getElementById('r-type').value;
+  const freq   = document.getElementById('r-freq').value;
+  const fromId = parseInt(document.getElementById('r-from').value);
+  const toId   = parseInt(document.getElementById('r-to').value);
+  const amount = parseFloat(document.getElementById('r-amount').value);
+  const next   = document.getElementById('r-next').value;
+  if (!desc) return alert('Please enter a description.');
+  if (isNaN(amount) || amount <= 0) return alert('Please enter a valid amount.');
+  if (!next) return alert('Please select a start date.');
+  db.recurring.push({ id: nextId('recurring'), type, description: desc, amount, fromAccountId: fromId, toAccountId: toId, frequency: freq, nextDate: next, active: true });
+  saveDB(); closeModal(); renderRecurring();
+}
+
+function toggleRecurring(id, active) {
+  const r = db.recurring.find(x => x.id === +id); if (r) { r.active = active; saveDB(); }
+}
+
+function deleteRecurring(id) {
+  if (!confirm('Delete this recurring rule?')) return;
+  db.recurring = db.recurring.filter(r => r.id !== +id);
+  saveDB(); renderRecurring();
+}
+
+function runRecurringNow(id) {
+  const r = db.recurring.find(x => x.id === +id); if (!r) return;
+  db.transactions.push({ id: nextId('transaction'), date: todayStr(), type: r.type, description: r.description, amount: r.amount, fromAccountId: r.fromAccountId, toAccountId: r.toAccountId });
+  r.nextDate = nextRecurringDate(r.nextDate, r.frequency);
+  saveDB();
+  alert(`Transaction recorded. Next date: ${fmtDate(r.nextDate)}`);
+  renderRecurring();
+}
+
+function nextRecurringDate(dateStr, frequency) {
+  const d = new Date(dateStr + 'T00:00:00');
+  if (frequency === 'weekly')    d.setDate(d.getDate() + 7);
+  else if (frequency === 'biweekly') d.setDate(d.getDate() + 14);
+  else if (frequency === 'monthly')  d.setMonth(d.getMonth() + 1);
+  else if (frequency === 'quarterly') d.setMonth(d.getMonth() + 3);
+  else if (frequency === 'yearly')   d.setFullYear(d.getFullYear() + 1);
+  return d.toISOString().split('T')[0];
+}
+
+function checkAndRunRecurring() {
+  const today = todayStr();
+  const due = db.recurring.filter(r => r.active !== false && r.nextDate && r.nextDate <= today);
+  if (due.length === 0) return;
+  const names = due.map(r => `• ${r.description} (${fmt(r.amount)})`).join('\n');
+  if (!confirm(`${due.length} recurring transaction${due.length>1?'s are':' is'} due:\n\n${names}\n\nRecord ${due.length>1?'them':'it'} now?`)) return;
+  for (const r of due) {
+    db.transactions.push({ id: nextId('transaction'), date: today, type: r.type, description: r.description, amount: r.amount, fromAccountId: r.fromAccountId, toAccountId: r.toAccountId });
+    r.nextDate = nextRecurringDate(r.nextDate, r.frequency);
+  }
+  saveDB();
+}
+
+// ═══════════════════════════════════════════════════════════
+// REPORTS — extended
+// ═══════════════════════════════════════════════════════════
+
+let _activeReport = 'pl';
+
+function renderReports() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="section-header">
+      <div class="section-title">Financial Reports</div>
+      <button class="btn btn-secondary" onclick="window.print()">🖨 Print</button>
+    </div>
+    <div class="report-tabs">
+      <button class="report-tab ${_activeReport==='pl'?'active':''}"        onclick="_activeReport='pl';renderReportBody()">Profit & Loss</button>
+      <button class="report-tab ${_activeReport==='bs'?'active':''}"        onclick="_activeReport='bs';renderReportBody()">Balance Sheet</button>
+      <button class="report-tab ${_activeReport==='tb'?'active':''}"        onclick="_activeReport='tb';renderReportBody()">Trial Balance</button>
+      <button class="report-tab ${_activeReport==='cf'?'active':''}"        onclick="_activeReport='cf';renderReportBody()">Cash Flow</button>
+      <button class="report-tab ${_activeReport==='ar'?'active':''}"        onclick="_activeReport='ar';renderReportBody()">A/R Aging</button>
+      <button class="report-tab ${_activeReport==='ap'?'active':''}"        onclick="_activeReport='ap';renderReportBody()">A/P Aging</button>
+      <button class="report-tab ${_activeReport==='ledger'?'active':''}"    onclick="_activeReport='ledger';renderReportBody()">General Ledger</button>
+    </div>
+    <div id="report-body"></div>`;
+  renderReportBody();
+}
+
+function renderReportBody() {
+  document.querySelectorAll('.report-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.report-tab').forEach(t => { if (t.textContent.toLowerCase().includes(_activeReport==='pl'?'profit':_activeReport==='bs'?'balance':_activeReport==='tb'?'trial':_activeReport==='cf'?'cash':_activeReport==='ar'?'a/r':_activeReport==='ap'?'a/p':'ledger')) t.classList.add('active'); });
+  const body = document.getElementById('report-body');
+  if (!body) return;
+  if (_activeReport === 'pl')     body.innerHTML = renderPL();
+  else if (_activeReport === 'bs')     body.innerHTML = renderBalanceSheet();
+  else if (_activeReport === 'tb')     body.innerHTML = renderTrialBalance();
+  else if (_activeReport === 'cf')     body.innerHTML = renderCashFlow();
+  else if (_activeReport === 'ar')     body.innerHTML = renderARAgeing();
+  else if (_activeReport === 'ap')     body.innerHTML = renderAPAgeing();
+  else if (_activeReport === 'ledger') body.innerHTML = renderLedger();
+}
+
+function renderTrialBalance() {
+  const accs = [...db.accounts].sort((a,b)=>a.code.localeCompare(b.code));
+  let totalDebit = 0, totalCredit = 0;
+  const rows = accs.map(a => {
+    const bal = getBalance(a.id);
+    // Normal debit accounts: asset, expense. Normal credit: liability, equity, revenue
+    const isDebit = ['asset','expense'].includes(a.type);
+    const debit  = (isDebit && bal > 0) || (!isDebit && bal < 0) ? Math.abs(bal) : 0;
+    const credit = (!isDebit && bal > 0) || (isDebit && bal < 0) ? Math.abs(bal) : 0;
+    totalDebit  += debit;
+    totalCredit += credit;
+    return `<tr>
+      <td class="text-mono">${escHtml(a.code)}</td>
+      <td class="fw-600">${escHtml(a.name)}</td>
+      <td><span class="badge badge-${a.type}" style="font-size:10px;">${a.type}</span></td>
+      <td class="text-right">${debit  ? fmt(debit)  : '—'}</td>
+      <td class="text-right">${credit ? fmt(credit) : '—'}</td>
+    </tr>`;
+  }).join('');
+  const balanced = Math.abs(totalDebit - totalCredit) < 0.01;
+  return `<div class="card"><div class="section-title" style="margin-bottom:14px">Trial Balance</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Code</th><th>Account</th><th>Type</th><th class="text-right">Debit</th><th class="text-right">Credit</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr style="background:#1e293b;color:#fff;font-weight:700;">
+          <td colspan="3" style="padding:10px 14px;">Totals</td>
+          <td style="padding:10px 14px;text-align:right;">${fmt(totalDebit)}</td>
+          <td style="padding:10px 14px;text-align:right;">${fmt(totalCredit)}</td>
+        </tr>
+      </tfoot>
+    </table></div>
+    <div style="margin-top:10px;font-size:13px;${balanced?'color:#059669;':'color:#dc2626;'}font-weight:600;">
+      ${balanced ? '✓ Books are balanced' : '⚠ Imbalance detected — debits and credits do not match'}
+    </div>
+  </div>`;
+}
+
+function renderCashFlow() {
+  // Simple indirect method cash flow
+  const net = netIncome();
+  // Operating: net income ± A/R changes (invoices unpaid = receivable increase = negative cash)
+  const arPending = db.invoices.filter(i=>['sent','overdue'].includes(i.status)).reduce((s,i)=>s+invTotal(i),0);
+  const apPending = db.bills.filter(b=>b.status==='unpaid').reduce((s,b)=>s+b.amount,0);
+  const cashFromOps = net - arPending + apPending;
+  // Financing: equity accounts movement
+  const totalEquityAcc = totalEquity();
+
+  const mkRow = (label, val, indent) => `<div class="report-row" style="${indent?'padding-left:28px':''}"><span>${label}</span><span style="color:${val>=0?'#059669':'#dc2626'}">${val>=0?'+':''}${fmt(val)}</span></div>`;
+
+  return `<div class="card"><div class="section-title" style="margin-bottom:14px">Cash Flow Statement</div>
+    <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+      <div class="report-section-title">Operating Activities</div>
+      ${mkRow('Net Income', net, true)}
+      ${mkRow('Change in Accounts Receivable', -arPending, true)}
+      ${mkRow('Change in Accounts Payable', apPending, true)}
+      <div class="report-row total-row"><span>Net Cash from Operations</span><span style="color:${cashFromOps>=0?'#059669':'#dc2626'}">${fmt(cashFromOps)}</span></div>
+      <div class="report-section-title">Financing Activities</div>
+      ${mkRow("Owner's Equity / Retained Earnings", totalEquityAcc, true)}
+      <div class="report-row total-row"><span>Net Cash from Financing</span><span>${fmt(totalEquityAcc)}</span></div>
+      <div class="report-row grand-total ${cashFromOps+totalEquityAcc>=0?'green':'red'}">
+        <span>Net Change in Cash</span><span>${fmt(cashFromOps + totalEquityAcc)}</span>
+      </div>
+    </div>
+    <p style="font-size:11px;color:#94a3b8;margin-top:10px;">Simplified indirect method. Consult an accountant for GAAP-compliant statements.</p>
+  </div>`;
+}
+
+function renderARAgeing() {
+  const today = new Date(todayStr());
+  const unpaid = db.invoices.filter(i => ['sent','overdue','draft'].includes(i.status));
+
+  const buckets = { current:[], d30:[], d60:[], d90:[] };
+  for (const inv of unpaid) {
+    const due = inv.dueDate ? new Date(inv.dueDate) : null;
+    const days = due ? Math.floor((today - due) / 86400000) : 0;
+    if (!due || days <= 0)   buckets.current.push({inv,days:0});
+    else if (days <= 30)     buckets.d30.push({inv,days});
+    else if (days <= 60)     buckets.d60.push({inv,days});
+    else                     buckets.d90.push({inv,days});
+  }
+  const sum = arr => arr.reduce((s,x)=>s+invTotal(x.inv),0);
+  const renderBucket = (arr) => arr.map(({inv,days})=>`<tr>
+    <td class="text-mono">#${String(inv.id).padStart(4,'0')}</td>
+    <td class="fw-600">${escHtml(inv.client)}</td>
+    <td class="text-muted">${fmtDate(inv.dueDate)}</td>
+    <td class="text-muted">${days?days+' days':'current'}</td>
+    <td class="fw-600 text-right">${fmt(invTotal(inv))}</td>
+  </tr>`).join('');
+
+  const mkBucket = (label, arr, color) => arr.length === 0 ? '' : `
+    <div class="report-section-title" style="color:${color}">${label} — ${fmt(sum(arr))}</div>
+    <div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Due Date</th><th>Days Late</th><th class="text-right">Amount</th></tr></thead>
+    <tbody>${renderBucket(arr)}</tbody></table></div>`;
+
+  const grandTotal = sum(buckets.current) + sum(buckets.d30) + sum(buckets.d60) + sum(buckets.d90);
+  return `<div class="card"><div class="section-title" style="margin-bottom:14px">Accounts Receivable Aging</div>
+    ${unpaid.length === 0
+      ? '<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">No outstanding receivables</div></div>'
+      : `<div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+          ${mkBucket('Current (not yet due)', buckets.current, '#059669')}
+          ${mkBucket('1–30 Days Past Due', buckets.d30, '#d97706')}
+          ${mkBucket('31–60 Days Past Due', buckets.d60, '#dc2626')}
+          ${mkBucket('61+ Days Past Due', buckets.d90, '#7c3aed')}
+          <div class="report-row grand-total"><span>Total Outstanding A/R</span><span>${fmt(grandTotal)}</span></div>
+        </div>`}
+  </div>`;
+}
+
+function renderAPAgeing() {
+  const today = new Date(todayStr());
+  const unpaid = db.bills.filter(b => b.status === 'unpaid');
+
+  const buckets = { current:[], d30:[], d60:[], d90:[] };
+  for (const bill of unpaid) {
+    const due = bill.dueDate ? new Date(bill.dueDate) : null;
+    const days = due ? Math.floor((today - due) / 86400000) : 0;
+    if (!due || days <= 0)   buckets.current.push({bill,days:0});
+    else if (days <= 30)     buckets.d30.push({bill,days});
+    else if (days <= 60)     buckets.d60.push({bill,days});
+    else                     buckets.d90.push({bill,days});
+  }
+  const sum = arr => arr.reduce((s,x)=>s+x.bill.amount,0);
+  const renderBucket = (arr) => arr.map(({bill,days})=>`<tr>
+    <td class="fw-600">${escHtml(bill.vendor)}</td>
+    <td class="text-muted">${escHtml(bill.description||'')}</td>
+    <td class="text-muted">${fmtDate(bill.dueDate)}</td>
+    <td class="text-muted">${days?days+' days':'current'}</td>
+    <td class="fw-600 text-right">${fmt(bill.amount)}</td>
+  </tr>`).join('');
+
+  const mkBucket = (label, arr, color) => arr.length === 0 ? '' : `
+    <div class="report-section-title" style="color:${color}">${label} — ${fmt(sum(arr))}</div>
+    <div class="table-wrap"><table><thead><tr><th>Vendor</th><th>Description</th><th>Due Date</th><th>Days Late</th><th class="text-right">Amount</th></tr></thead>
+    <tbody>${renderBucket(arr)}</tbody></table></div>`;
+
+  const grandTotal = sum(buckets.current)+sum(buckets.d30)+sum(buckets.d60)+sum(buckets.d90);
+  return `<div class="card"><div class="section-title" style="margin-bottom:14px">Accounts Payable Aging</div>
+    ${unpaid.length === 0
+      ? '<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">No outstanding payables</div></div>'
+      : `<div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+          ${mkBucket('Current (not yet due)', buckets.current, '#059669')}
+          ${mkBucket('1–30 Days Past Due', buckets.d30, '#d97706')}
+          ${mkBucket('31–60 Days Past Due', buckets.d60, '#dc2626')}
+          ${mkBucket('61+ Days Past Due', buckets.d90, '#7c3aed')}
+          <div class="report-row grand-total"><span>Total Outstanding A/P</span><span>${fmt(grandTotal)}</span></div>
+        </div>`}
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// CSV IMPORT
+// ═══════════════════════════════════════════════════════════
+
+function renderImport() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="section-header"><div class="section-title">CSV Import</div></div>
+    <div class="card">
+      <p style="font-size:14px;color:#475569;margin-bottom:16px;">Import transactions from a bank or credit card statement CSV file.</p>
+      <div class="form-group">
+        <label>Upload CSV File</label>
+        <div class="receipt-upload" onclick="document.getElementById('csv-file').click()">
+          <div class="receipt-upload-text">📂 <strong>Click to choose</strong> a CSV file</div>
+          <input type="file" id="csv-file" accept=".csv,text/csv" onchange="previewCSV(this)">
+        </div>
+      </div>
+      <div id="csv-preview"></div>
+    </div>`;
+}
+
+function showCSVImport() { navigate('import'); }
+
+function previewCSV(input) {
+  const file = input.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const rows = parseCSV(e.target.result);
+    if (rows.length < 2) { document.getElementById('csv-preview').innerHTML = '<p style="color:#dc2626">Could not parse CSV — make sure it has a header row.</p>'; return; }
+    const headers = rows[0];
+    const preview = document.getElementById('csv-preview');
+    const opts = headers.map((h,i) => `<option value="${i}">${escHtml(h)}</option>`).join('');
+    const blankOpt = '<option value="-1">— skip —</option>';
+
+    // Guess column indices
+    const gi = (keywords) => { const i = headers.findIndex(h => keywords.some(k => h.toLowerCase().includes(k))); return i >= 0 ? i : -1; };
+    const dateIdx   = gi(['date']);
+    const descIdx   = gi(['desc','memo','narration','payee','name','detail']);
+    const amtIdx    = gi(['amount','debit','credit','sum','value']);
+
+    preview.innerHTML = `
+      <hr class="divider">
+      <p style="font-size:13px;color:#475569;margin-bottom:12px;">Map your CSV columns (${rows.length-1} rows detected):</p>
+      <div class="form-row-3" style="margin-bottom:14px;">
+        <div class="form-group"><label>Date Column</label><select id="ci-date">${blankOpt}${opts}</select></div>
+        <div class="form-group"><label>Description Column</label><select id="ci-desc">${blankOpt}${opts}</select></div>
+        <div class="form-group"><label>Amount Column</label><select id="ci-amt">${blankOpt}${opts}</select></div>
+      </div>
+      <div class="form-row" style="margin-bottom:14px;">
+        <div class="form-group">
+          <label>Transaction Type</label>
+          <select id="ci-type">
+            <option value="expense">Expense (negative = money out)</option>
+            <option value="income">Income (positive = money in)</option>
+            <option value="auto">Auto-detect (positive=income, negative=expense)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Default Asset Account</label>
+          <select id="ci-asset">${buildAccountOptions(['asset'])}</select>
+        </div>
+      </div>
+      <div class="form-row" style="margin-bottom:14px;">
+        <div class="form-group"><label>Default Expense Account</label><select id="ci-expense">${buildAccountOptions(['expense'])}</select></div>
+        <div class="form-group"><label>Default Revenue Account</label><select id="ci-revenue">${buildAccountOptions(['revenue'])}</select></div>
+      </div>
+      <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:14px;">
+        <table><thead><tr>${headers.map(h=>`<th>${escHtml(h)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.slice(1,6).map(r=>`<tr>${r.map(c=>`<td class="text-muted">${escHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>
+      </div>
+      <button class="btn btn-primary" onclick="importCSVData(${JSON.stringify(rows.slice(1)).replace(/</g,'\\u003c')})">Import ${rows.length-1} Transactions</button>`;
+
+    // Apply guesses
+    if (dateIdx >= 0) document.getElementById('ci-date').value = dateIdx;
+    if (descIdx >= 0) document.getElementById('ci-desc').value = descIdx;
+    if (amtIdx  >= 0) document.getElementById('ci-amt').value  = amtIdx;
+  };
+  reader.readAsText(file);
+}
+
+function parseCSV(text) {
+  const rows = [];
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const cells = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++; } else { inQ = !inQ; } }
+      else if (ch === ',' && !inQ) { cells.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    cells.push(cur.trim());
+    rows.push(cells);
+  }
+  return rows;
+}
+
+function importCSVData(rows) {
+  const di    = parseInt(document.getElementById('ci-date').value);
+  const desi  = parseInt(document.getElementById('ci-desc').value);
+  const ai    = parseInt(document.getElementById('ci-amt').value);
+  const txType = document.getElementById('ci-type').value;
+  const assetId   = parseInt(document.getElementById('ci-asset').value);
+  const expenseId = parseInt(document.getElementById('ci-expense').value);
+  const revenueId = parseInt(document.getElementById('ci-revenue').value);
+
+  if (di < 0 || desi < 0 || ai < 0) return alert('Please map the Date, Description, and Amount columns.');
+
+  let imported = 0, skipped = 0;
+  for (const row of rows) {
+    const rawDate = row[di]?.trim();
+    const desc    = row[desi]?.trim();
+    const rawAmt  = row[ai]?.trim().replace(/[$,\s]/g,'');
+    const amount  = parseFloat(rawAmt);
+
+    if (!rawDate || !desc || isNaN(amount) || amount === 0) { skipped++; continue; }
+
+    // Normalise date to YYYY-MM-DD
+    let date = rawDate;
+    const m = rawDate.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if (m) { const y = m[3].length===2?'20'+m[3]:m[3]; date = `${y}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`; }
+
+    let type, fromId, toId;
+    if (txType === 'auto') {
+      type = amount >= 0 ? 'income' : 'expense';
+    } else {
+      type = txType;
+    }
+    if (type === 'income')  { fromId = revenueId; toId = assetId; }
+    else                    { fromId = expenseId; toId = assetId; }
+
+    db.transactions.push({ id: nextId('transaction'), date, type, description: desc, amount: Math.abs(amount), fromAccountId: fromId, toAccountId: toId });
+    imported++;
+  }
+
+  saveDB();
+  alert(`Imported ${imported} transaction${imported!==1?'s':''}${skipped?`, skipped ${skipped} invalid rows`:''}.`);
+  navigate('transactions');
+}
+
+// ═══════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════
 
@@ -1875,6 +2926,7 @@ if (localStorage.getItem('cc_sidebar_collapsed') === '1') {
 
 loadDB().then(() => {
   updateSyncBadge();
+  checkAndRunRecurring();
   renderDashboard();
   if (_cloudMode) startCloudPolling();
 });
