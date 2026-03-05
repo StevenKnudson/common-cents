@@ -11,11 +11,11 @@ body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sa
 /* ── Sidebar ── */
 .sidebar { width: 220px; background: #1e293b; color: #94a3b8; display: flex; flex-direction: column; flex-shrink: 0; transition: width 0.2s ease; overflow: hidden; }
 .sidebar.collapsed { width: 52px; }
-.sidebar-logo { padding: 20px 18px 16px; font-size: 20px; font-weight: 800; color: #fff; letter-spacing: -0.5px; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; white-space: nowrap; }
+.sidebar-logo { padding: 20px 14px 16px; font-size: 20px; font-weight: 800; color: #fff; letter-spacing: -0.5px; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sidebar-logo span { color: #60a5fa; }
-.sidebar-logo small { display: block; font-size: 10px; font-weight: 400; color: #64748b; letter-spacing: 0; margin-top: 2px; }
-.sidebar-logo-text { transition: opacity 0.15s; }
-.sidebar.collapsed .sidebar-logo-text { opacity: 0; pointer-events: none; }
+.sidebar-logo small { display: block; font-size: 10px; font-weight: 400; color: #64748b; letter-spacing: 0; margin-top: 2px; white-space: nowrap; }
+.sidebar-logo-text { overflow: hidden; max-width: 180px; opacity: 1; transition: max-width 0.2s ease, opacity 0.15s; white-space: nowrap; }
+.sidebar.collapsed .sidebar-logo-text { max-width: 0; opacity: 0; }
 .sidebar-toggle { background: none; border: none; color: #64748b; cursor: pointer; font-size: 16px; padding: 2px 4px; border-radius: 4px; flex-shrink: 0; line-height: 1; transition: color 0.15s; }
 .sidebar-toggle:hover { color: #e2e8f0; }
 .nav-section { padding: 16px 10px 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; white-space: nowrap; transition: opacity 0.15s; }
