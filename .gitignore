@@ -10,6 +10,9 @@ desktop.ini
 .vscode/
 .idea/
 
-# Node (if ever added)
+# Node
 node_modules/
 npm-debug.log*
+
+# Docker / deploy
+nginx/nginx-init.conf

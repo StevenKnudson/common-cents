@@ -15,9 +15,10 @@ const path = require('path');
 const os   = require('os');
 const url  = require('url');
 
-const PORT      = 3000;
+const PORT      = parseInt(process.env.PORT, 10) || 3000;
 const ROOT      = __dirname;
-const DATA_FILE = path.join(ROOT, 'data.json');
+const DATA_DIR  = process.env.DATA_DIR || ROOT;
+const DATA_FILE = path.join(DATA_DIR, 'data.json');
 
 // ── MIME types ────────────────────────────────────────────────
 const MIME = {
