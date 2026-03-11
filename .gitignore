@@ -1,4 +1,4 @@
-# User data — never commit real financial data
+# User data
 data.json
 
 # OS files
@@ -14,5 +14,21 @@ desktop.ini
 node_modules/
 npm-debug.log*
 
+# Build output
+dist/
+.turbo/
+
+# Environment
+.env
+.env.local
+
 # Docker / deploy
 nginx/nginx-init.conf
+
+# Prisma
+apps/api/prisma/migrations/**/migration_lock.toml
+
+# Mobile
+apps/mobile/.expo/
+apps/mobile/ios/
+apps/mobile/android/

@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Common Cents",
+    "slug": "common-cents",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "commoncents",
+    "platforms": ["ios", "android"],
+    "ios": {
+      "bundleIdentifier": "com.commoncents.app"
+    },
+    "android": {
+      "package": "com.commoncents.app"
+    }
+  }
+}

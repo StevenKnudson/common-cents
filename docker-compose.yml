@@ -1,11 +1,40 @@
 services:
-  app:
-    build: .
+  db:
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      - DATA_DIR=/app/data
+      POSTGRES_DB: commoncents
+      POSTGRES_USER: commoncents
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-commoncents}
     volumes:
-      - app-data:/app/data
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commoncents"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://commoncents:${DB_PASSWORD:-commoncents}@db:5432/commoncents
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      API_PORT: 4000
+      WEB_URL: ${WEB_URL:-http://localhost}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    depends_on:
+      - api
 
   nginx:
     image: nginx:alpine
@@ -18,7 +47,8 @@ services:
       - certbot-webroot:/var/www/certbot:ro
       - certbot-certs:/etc/letsencrypt:ro
     depends_on:
-      - app
+      - api
+      - web
 
   certbot:
     image: certbot/certbot
@@ -28,6 +58,6 @@ services:
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done'"
 
 volumes:
-  app-data:
+  pgdata:
   certbot-webroot:
   certbot-certs:

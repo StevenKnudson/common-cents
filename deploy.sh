@@ -11,8 +11,9 @@ set -euo pipefail
 #
 # This script:
 #   - Installs Docker & Docker Compose (if missing)
+#   - Generates a secure .env file
 #   - Obtains a Let's Encrypt SSL certificate
-#   - Starts the app behind nginx with HTTPS
+#   - Builds and starts the full stack (PostgreSQL + API + Web + nginx)
 
 DOMAIN="${1:?Usage: sudo bash deploy.sh <domain> <email>}"
 EMAIL="${2:?Usage: sudo bash deploy.sh <domain> <email>}"
@@ -34,6 +35,20 @@ if ! command -v docker &>/dev/null; then
   apt-get update -qq
   apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
   echo "  Docker installed."
+fi
+
+# ── Generate .env if missing ─────────────────────────────────
+if [ ! -f .env ]; then
+  echo "  Generating .env..."
+  DB_PASSWORD=$(openssl rand -hex 24)
+  JWT_SECRET=$(openssl rand -hex 32)
+  cat > .env <<ENVEOF
+DB_PASSWORD=$DB_PASSWORD
+JWT_SECRET=$JWT_SECRET
+WEB_URL=https://$DOMAIN
+ENVEOF
+  chmod 600 .env
+  echo "  .env created with secure random secrets."
 fi
 
 # ── Update nginx config with actual domain ────────────────────
@@ -58,19 +73,16 @@ server {
 }
 INITEOF
 
-# Build the app and start nginx with init config
-docker compose build app
-docker compose up -d app
 docker run --rm -d --name nginx-init \
   -p 80:80 \
   -v "$(pwd)/nginx/nginx-init.conf:/etc/nginx/conf.d/default.conf:ro" \
-  -v certbot-webroot:/var/www/certbot:ro \
+  -v common-cents_certbot-webroot:/var/www/certbot:ro \
   nginx:alpine
 
 # Request the certificate
 docker run --rm \
-  -v certbot-webroot:/var/www/certbot \
-  -v certbot-certs:/etc/letsencrypt \
+  -v common-cents_certbot-webroot:/var/www/certbot \
+  -v common-cents_certbot-certs:/etc/letsencrypt \
   certbot/certbot certonly --webroot \
   --webroot-path /var/www/certbot \
   --email "$EMAIL" --agree-tos --no-eff-email \
@@ -80,9 +92,9 @@ docker run --rm \
 docker stop nginx-init 2>/dev/null || true
 rm -f nginx/nginx-init.conf
 
-# ── Start everything ──────────────────────────────────────────
-echo "  Starting Common Cents..."
-docker compose up -d
+# ── Build and start everything ────────────────────────────────
+echo "  Building and starting Common Cents..."
+docker compose up -d --build
 
 echo ""
 echo "  ────────────────────────────────────────────"
@@ -90,7 +102,19 @@ echo "  Done! Your app is live at:"
 echo ""
 echo "    https://$DOMAIN"
 echo ""
-echo "  Data is stored in a Docker volume (app-data)."
-echo "  To back up:  docker run --rm -v common-cents_app-data:/data -v \$(pwd):/backup alpine tar czf /backup/data-backup.tar.gz -C /data ."
+echo "  Stack:"
+echo "    - PostgreSQL 16"
+echo "    - Express API (port 4000 internal)"
+echo "    - React frontend"
+echo "    - nginx reverse proxy with SSL"
+echo ""
+echo "  Useful commands:"
+echo "    docker compose logs -f          # view logs"
+echo "    docker compose exec api sh      # shell into API"
+echo "    docker compose down             # stop everything"
+echo "    docker compose up -d --build    # rebuild & restart"
+echo ""
+echo "  Database backup:"
+echo "    docker compose exec db pg_dump -U commoncents commoncents > backup.sql"
 echo "  ────────────────────────────────────────────"
 echo ""

@@ -1,0 +1,246 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Auth ─────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  role      Role     @default(OWNER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organizations OrganizationMember[]
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  ACCOUNTANT
+  VIEWER
+}
+
+// ── Multi-tenancy ────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members      OrganizationMember[]
+  accounts     Account[]
+  transactions Transaction[]
+  invoices     Invoice[]
+  contacts     Contact[]
+  categories   Category[]
+  taxRates     TaxRate[]
+  bizInfo      BizInfo?
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           Role         @default(VIEWER)
+  createdAt      DateTime     @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+}
+
+// ── Chart of Accounts ────────────────────────────────────────
+
+model Account {
+  id             String       @id @default(cuid())
+  code           String
+  name           String
+  type           AccountType
+  parentId       String?
+  organizationId String
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  parent       Account?     @relation("AccountTree", fields: [parentId], references: [id])
+  children     Account[]    @relation("AccountTree")
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  debitEntries  JournalEntry[] @relation("DebitAccount")
+  creditEntries JournalEntry[] @relation("CreditAccount")
+  invoiceItems  InvoiceItem[]
+
+  @@unique([code, organizationId])
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+// ── Transactions & Double-Entry ──────────────────────────────
+
+model Transaction {
+  id             String   @id @default(cuid())
+  date           DateTime
+  description    String
+  reference      String?
+  organizationId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  entries      JournalEntry[]
+}
+
+model JournalEntry {
+  id            String @id @default(cuid())
+  transactionId String
+  debitAccountId  String
+  creditAccountId String
+  amount        Decimal @db.Decimal(19, 4)
+
+  transaction  Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  debitAccount  Account    @relation("DebitAccount", fields: [debitAccountId], references: [id])
+  creditAccount Account    @relation("CreditAccount", fields: [creditAccountId], references: [id])
+}
+
+// ── Contacts (Clients & Vendors) ─────────────────────────────
+
+model Contact {
+  id             String      @id @default(cuid())
+  name           String
+  email          String?
+  phone          String?
+  address        String?
+  type           ContactType
+  organizationId String
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoices     Invoice[]
+}
+
+enum ContactType {
+  CLIENT
+  VENDOR
+  BOTH
+}
+
+// ── Invoices ─────────────────────────────────────────────────
+
+model Invoice {
+  id             String        @id @default(cuid())
+  number         String
+  contactId      String
+  organizationId String
+  status         InvoiceStatus @default(DRAFT)
+  issueDate      DateTime
+  dueDate        DateTime
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  contact      Contact      @relation(fields: [contactId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  items        InvoiceItem[]
+  payments     Payment[]
+
+  @@unique([number, organizationId])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  VIEWED
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Decimal @db.Decimal(10, 2)
+  unitPrice   Decimal @db.Decimal(19, 4)
+  accountId   String?
+  taxRateId   String?
+
+  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id])
+  taxRate TaxRate? @relation(fields: [taxRateId], references: [id])
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  invoiceId String
+  amount    Decimal       @db.Decimal(19, 4)
+  date      DateTime
+  method    PaymentMethod
+  reference String?
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+enum PaymentMethod {
+  CASH
+  CHECK
+  BANK_TRANSFER
+  CREDIT_CARD
+  OTHER
+}
+
+// ── Tax ──────────────────────────────────────────────────────
+
+model TaxRate {
+  id             String   @id @default(cuid())
+  name           String
+  rate           Decimal  @db.Decimal(5, 2)
+  organizationId String
+  createdAt      DateTime @default(now())
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoiceItems InvoiceItem[]
+}
+
+// ── Categories ───────────────────────────────────────────────
+
+model Category {
+  id             String   @id @default(cuid())
+  name           String
+  color          String?
+  organizationId String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+// ── Business Info ────────────────────────────────────────────
+
+model BizInfo {
+  id             String  @id @default(cuid())
+  organizationId String  @unique
+  name           String?
+  address        String?
+  email          String?
+  phone          String?
+  taxId          String?
+  logoUrl        String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
