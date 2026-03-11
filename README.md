@@ -52,7 +52,7 @@ This starts three services:
 | **nginx** | Reverse proxy with SSL termination (ports 80/443) |
 | **certbot** | Automated Let's Encrypt certificate renewal |
 
-App data is persisted in a Docker volume (`app-data`).
+App data is persisted in a Docker volume (`app-data`). If no SSL certificate is found, nginx automatically generates a self-signed certificate so the stack starts without errors. For production, use `deploy.sh` to obtain a real Let's Encrypt certificate.
 
 ### VPS Deployment (one-click)
 
