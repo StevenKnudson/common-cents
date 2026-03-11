@@ -16,7 +16,7 @@ A simple, self-hosted accounting web app — no subscriptions, no frameworks, no
 - Vanilla HTML + CSS + JavaScript — zero frameworks, zero npm packages
 - Node.js HTTP server (no dependencies) for multi-device and Docker deployments
 - Three-tier data storage: GitHub Gist (cloud) → local network server (`data.json`) → browser `localStorage`
-- Docker + Nginx + Let's Encrypt for production hosting
+- Docker + Nginx + Let's Encrypt for production hosting (via `deploy.sh`)
 
 ## Getting Started
 
@@ -44,14 +44,7 @@ Build and run with Docker Compose:
 docker-compose up -d
 ```
 
-This starts two services:
-
-| Service | Purpose |
-|---------|---------|
-| **app** | Node.js server on port 3000 |
-| **nginx** | Reverse proxy on port 80 |
-
-App data is persisted in a Docker volume (`app-data`). For production with HTTPS, use `deploy.sh` instead.
+The app is available at `http://localhost` (port 80). Data is persisted in a Docker volume (`app-data`). For production with HTTPS, use `deploy.sh` instead.
 
 ### VPS Deployment (one-click)
 
@@ -87,9 +80,8 @@ Then click **PDF** on any invoice to open a print-ready page. Use **Save as PDF*
 | `server.js` | Minimal Node.js HTTP server for local network and Docker use |
 | `start-server.bat` | Windows launcher — double-click to start the server |
 | `Dockerfile` | Container image definition (Node 20 Alpine) |
-| `docker-compose.yml` | Docker deployment with app and Nginx |
+| `docker-compose.yml` | Docker deployment (app on port 80) |
 | `deploy.sh` | One-click VPS deployment script with SSL (Ubuntu) |
-| `nginx/nginx.conf` | Reverse proxy configuration (HTTP) |
-| `nginx/nginx-ssl.conf` | SSL reverse proxy template (used by `deploy.sh`) |
+| `nginx/` | Nginx config templates (used by `deploy.sh`) |
 
 > **Note:** `data.json` is excluded from version control (`.gitignore`) to protect your financial data.

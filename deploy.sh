@@ -36,10 +36,10 @@ if ! command -v docker &>/dev/null; then
   echo "  Docker installed."
 fi
 
-# ── Switch to SSL nginx config ────────────────────────────────
-cp nginx/nginx-ssl.conf nginx/nginx.conf
-sed -i "s/server_name _;/server_name $DOMAIN;/g" nginx/nginx.conf
-sed -i "s|/etc/letsencrypt/live/app/|/etc/letsencrypt/live/$DOMAIN/|g" nginx/nginx.conf
+# ── Prepare SSL nginx config ─────────────────────────────────
+cp nginx/nginx-ssl.conf nginx/nginx-prod.conf
+sed -i "s/server_name _;/server_name $DOMAIN;/g" nginx/nginx-prod.conf
+sed -i "s|/etc/letsencrypt/live/app/|/etc/letsencrypt/live/$DOMAIN/|g" nginx/nginx-prod.conf
 
 # ── Get SSL certificate ──────────────────────────────────────
 echo "  Obtaining SSL certificate for $DOMAIN..."
@@ -81,17 +81,24 @@ docker run --rm \
 docker stop nginx-init 2>/dev/null || true
 rm -f nginx/nginx-init.conf
 
-# ── Upgrade docker-compose for production (SSL + certbot) ─────
+# ── Create production docker-compose override ─────────────────
 cat > docker-compose.override.yml <<'OVERRIDE'
 services:
+  app:
+    ports: !reset []
+
   nginx:
+    image: nginx:alpine
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/nginx-prod.conf:/etc/nginx/conf.d/default.conf:ro
       - certbot-webroot:/var/www/certbot:ro
       - certbot-certs:/etc/letsencrypt:ro
+    depends_on:
+      - app
 
   certbot:
     image: certbot/certbot
