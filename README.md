@@ -80,8 +80,9 @@ Then click **PDF** on any invoice to open a print-ready page. Use **Save as PDF*
 | `server.js` | Minimal Node.js HTTP server for local network and Docker use |
 | `start-server.bat` | Windows launcher — double-click to start the server |
 | `Dockerfile` | Container image definition (Node 20 Alpine) |
-| `docker-compose.yml` | Docker deployment (app on port 80) |
+| `docker-compose.yml` | Docker deployment with app and Nginx (HTTP) |
 | `deploy.sh` | One-click VPS deployment script with SSL (Ubuntu) |
-| `nginx/` | Nginx config templates (used by `deploy.sh`) |
+| `nginx/nginx.conf` | Nginx reverse proxy configuration (HTTP) |
+| `nginx/nginx-ssl.conf` | SSL reverse proxy template (used by `deploy.sh`) |
 
 > **Note:** `data.json` is excluded from version control (`.gitignore`) to protect your financial data.
