@@ -44,15 +44,14 @@ Build and run with Docker Compose:
 docker-compose up -d
 ```
 
-This starts three services:
+This starts two services:
 
 | Service | Purpose |
 |---------|---------|
 | **app** | Node.js server on port 3000 |
-| **nginx** | Reverse proxy with SSL termination (ports 80/443) |
-| **certbot** | Automated Let's Encrypt certificate renewal |
+| **nginx** | Reverse proxy on port 80 |
 
-App data is persisted in a Docker volume (`app-data`). If no SSL certificate is found, nginx automatically generates a self-signed certificate so the stack starts without errors. For production, use `deploy.sh` to obtain a real Let's Encrypt certificate.
+App data is persisted in a Docker volume (`app-data`). For production with HTTPS, use `deploy.sh` instead.
 
 ### VPS Deployment (one-click)
 
@@ -88,8 +87,9 @@ Then click **PDF** on any invoice to open a print-ready page. Use **Save as PDF*
 | `server.js` | Minimal Node.js HTTP server for local network and Docker use |
 | `start-server.bat` | Windows launcher — double-click to start the server |
 | `Dockerfile` | Container image definition (Node 20 Alpine) |
-| `docker-compose.yml` | Production deployment with app, Nginx, and Certbot |
-| `deploy.sh` | One-click VPS deployment script for Ubuntu |
-| `nginx/nginx.conf` | Reverse proxy and SSL configuration |
+| `docker-compose.yml` | Docker deployment with app and Nginx |
+| `deploy.sh` | One-click VPS deployment script with SSL (Ubuntu) |
+| `nginx/nginx.conf` | Reverse proxy configuration (HTTP) |
+| `nginx/nginx-ssl.conf` | SSL reverse proxy template (used by `deploy.sh`) |
 
 > **Note:** `data.json` is excluded from version control (`.gitignore`) to protect your financial data.

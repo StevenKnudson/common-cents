@@ -36,7 +36,8 @@ if ! command -v docker &>/dev/null; then
   echo "  Docker installed."
 fi
 
-# ── Update nginx config with actual domain ────────────────────
+# ── Switch to SSL nginx config ────────────────────────────────
+cp nginx/nginx-ssl.conf nginx/nginx.conf
 sed -i "s/server_name _;/server_name $DOMAIN;/g" nginx/nginx.conf
 sed -i "s|/etc/letsencrypt/live/app/|/etc/letsencrypt/live/$DOMAIN/|g" nginx/nginx.conf
 
@@ -79,6 +80,30 @@ docker run --rm \
 # Stop temporary nginx
 docker stop nginx-init 2>/dev/null || true
 rm -f nginx/nginx-init.conf
+
+# ── Upgrade docker-compose for production (SSL + certbot) ─────
+cat > docker-compose.override.yml <<'OVERRIDE'
+services:
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot-webroot:/var/www/certbot:ro
+      - certbot-certs:/etc/letsencrypt:ro
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot-webroot:/var/www/certbot
+      - certbot-certs:/etc/letsencrypt
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done'"
+
+volumes:
+  certbot-webroot:
+  certbot-certs:
+OVERRIDE
 
 # ── Start everything ──────────────────────────────────────────
 echo "  Starting Common Cents..."
