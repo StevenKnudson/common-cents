@@ -85,7 +85,6 @@ Then click **PDF** on any invoice to open a print-ready page. Use **Save as PDF*
 | File | Description |
 |------|-------------|
 | `index.html` | The entire app — HTML, CSS, and JavaScript in one file |
-| `landing.html` | Marketing/landing page |
 | `server.js` | Minimal Node.js HTTP server for local network and Docker use |
 | `start-server.bat` | Windows launcher — double-click to start the server |
 | `Dockerfile` | Container image definition (Node 20 Alpine) |

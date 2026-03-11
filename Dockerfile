@@ -2,7 +2,7 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY server.js index.html landing.html ./
+COPY server.js index.html ./
 
 RUN mkdir -p /app/data
 
