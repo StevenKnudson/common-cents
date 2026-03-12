@@ -41,10 +41,53 @@ Requires [Node.js](https://nodejs.org/) (no packages needed).
 Build and run with Docker Compose:
 
 ```bash
-docker-compose up -d
+docker-compose up -d --build
 ```
 
-The app is available at `http://localhost` (port 80). Data is persisted in a Docker volume (`app-data`). For production with HTTPS, use `deploy.sh` instead.
+The app is available at `http://localhost` (port 80). Data is persisted in a Docker volume (`app-data`).
+
+#### Common Docker Commands
+
+```bash
+# Start containers (rebuild images if files changed)
+docker-compose up -d --build
+
+# Stop all containers
+docker-compose down
+
+# Stop containers and remove orphaned services
+docker-compose down --remove-orphans
+
+# View logs (follow mode)
+docker-compose logs -f
+
+# View logs for a specific service
+docker-compose logs -f app
+docker-compose logs -f nginx
+
+# Restart a single service
+docker-compose restart app
+
+# Check container status
+docker-compose ps
+
+# Rebuild a single service without stopping others
+docker-compose up -d --build app
+
+# Shell into the running app container
+docker exec -it $(docker-compose ps -q app) sh
+
+# Back up the data volume
+docker run --rm -v common-cents_app-data:/data -v $(pwd):/backup alpine tar czf /backup/data-backup.tar.gz -C /data .
+
+# Restore from backup
+docker run --rm -v common-cents_app-data:/data -v $(pwd):/backup alpine sh -c "cd /data && tar xzf /backup/data-backup.tar.gz"
+
+# Remove everything (containers, volumes, images) — WARNING: deletes all data
+docker-compose down -v --rmi all
+```
+
+For production with HTTPS, use `deploy.sh` instead.
 
 ### VPS Deployment (one-click)
 
