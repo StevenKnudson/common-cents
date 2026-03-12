@@ -92,6 +92,21 @@ tbody tr:hover td { background: #f8fafc; }
 .badge-sent { background: #dbeafe; color: #1d4ed8; }
 .badge-paid { background: #d1fae5; color: #059669; }
 .badge-overdue { background: #fee2e2; color: #dc2626; }
+.badge-active { background: #d1fae5; color: #059669; }
+.badge-completed { background: #f1f5f9; color: #64748b; }
+.badge-project { background: #ede9fe; color: #7c3aed; font-size: 11px; }
+
+/* ── Project cards ── */
+.project-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.project-card { background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 20px; cursor: pointer; transition: all 0.15s; }
+.project-card:hover { border-color: #2563eb; box-shadow: 0 4px 12px rgba(37,99,235,0.08); }
+.project-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+.project-card-name { font-size: 15px; font-weight: 700; color: #1e293b; }
+.project-card-client { font-size: 13px; color: #64748b; margin-bottom: 12px; }
+.project-card-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.project-card-stat { text-align: center; }
+.project-card-stat-label { font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
+.project-card-stat-value { font-size: 14px; font-weight: 700; margin-top: 2px; }
 
 /* ── Modal ── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(2px); }
@@ -193,6 +208,9 @@ textarea { resize: vertical; min-height: 70px; }
     <div class="nav-item" data-section="invoices" onclick="navigate('invoices')" title="Invoices">
       <span class="nav-icon">📄</span><span class="nav-label"> Invoices</span>
     </div>
+    <div class="nav-item" data-section="projects" onclick="navigate('projects')" title="Projects">
+      <span class="nav-icon">📁</span><span class="nav-label"> Projects</span>
+    </div>
     <div class="nav-section">Analysis</div>
     <div class="nav-item" data-section="reports" onclick="navigate('reports')" title="Reports">
       <span class="nav-icon">📈</span><span class="nav-label"> Reports</span>
@@ -243,10 +261,11 @@ const DEFAULT_ACCOUNTS = [
 
 let db = {
   accounts: JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS)),
-  transactions: [],  // { id, date, type, description, amount, fromAccountId, toAccountId }
-  invoices: [],      // { id, client, clientEmail, date, dueDate, items:[{desc,qty,rate}], status, notes }
+  transactions: [],  // { id, date, type, description, amount, fromAccountId, toAccountId, projectId? }
+  invoices: [],      // { id, client, clientEmail, date, dueDate, items:[{desc,qty,rate}], status, notes, projectId? }
+  projects: [],      // { id, name, client, status, description }
   bizInfo: { name: '', address: '', email: '', phone: '' },
-  nextId: { account: 16, transaction: 1, invoice: 1 }
+  nextId: { account: 16, transaction: 1, invoice: 1, project: 1 }
 };
 
 // true when the app is being served by server.js (network mode)
@@ -464,6 +483,7 @@ const PAGE_TITLES = {
   accounts: 'Chart of Accounts',
   transactions: 'Transactions',
   invoices: 'Invoices',
+  projects: 'Projects',
   reports: 'Reports'
 };
 
@@ -475,7 +495,7 @@ function navigate(section) {
     el.classList.toggle('active', el.dataset.section === section);
   });
   document.getElementById('topbar-title').textContent = PAGE_TITLES[section] || section;
-  const renders = { dashboard: renderDashboard, accounts: renderAccounts, transactions: renderTransactions, invoices: renderInvoices, reports: renderReports };
+  const renders = { dashboard: renderDashboard, accounts: renderAccounts, transactions: renderTransactions, invoices: renderInvoices, projects: renderProjects, reports: renderReports };
   if (renders[section]) renders[section]();
 }
 
@@ -695,12 +715,13 @@ function renderTransactions() {
             <button class="btn btn-primary" onclick="showAddTransaction()">+ Add Transaction</button>
           </div>`
         : `<div class="table-wrap"><table>
-          <thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Account (From)</th><th>Account (To)</th><th class="text-right">Amount</th><th>Receipt</th><th></th></tr></thead>
+          <thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Project</th><th>Account (From)</th><th>Account (To)</th><th class="text-right">Amount</th><th>Receipt</th><th></th></tr></thead>
           <tbody>
             ${txns.map(t => {
               const from = getAccount(t.fromAccountId);
               const to   = getAccount(t.toAccountId);
               const color = t.type === 'income' ? '#059669' : t.type === 'expense' ? '#dc2626' : '#4f46e5';
+              const pName = getProjectName(t.projectId);
               const receiptCell = t.receiptData
                 ? `<button class="receipt-badge" onclick="viewReceipt(${t.id})">📎 View</button>`
                 : `<button class="btn btn-xs btn-secondary" onclick="attachReceipt(${t.id})">+ Attach</button>`;
@@ -708,6 +729,7 @@ function renderTransactions() {
                 <td class="text-muted" style="white-space:nowrap">${fmtDate(t.date)}</td>
                 <td class="fw-600">${escHtml(t.description)}</td>
                 <td><span class="badge badge-${t.type}">${t.type}</span></td>
+                <td>${pName ? `<span class="badge badge-project">${escHtml(pName)}</span>` : '<span class="text-muted">—</span>'}</td>
                 <td class="text-muted">${from ? escHtml(from.name) : '—'}</td>
                 <td class="text-muted">${to   ? escHtml(to.name)   : '—'}</td>
                 <td class="fw-600 text-right" style="color:${color}">${fmt(t.amount)}</td>
@@ -727,6 +749,20 @@ function buildAccountOptions(types) {
     .sort((a,b) => a.code.localeCompare(b.code))
     .map(a => `<option value="${a.id}">${a.code} — ${escHtml(a.name)}</option>`)
     .join('');
+}
+
+function buildProjectOptions(selectedId) {
+  if (!db.projects || db.projects.length === 0) return '<option value="">No projects</option>';
+  const active = db.projects.filter(p => p.status === 'active').sort((a,b) => a.name.localeCompare(b.name));
+  const completed = db.projects.filter(p => p.status === 'completed').sort((a,b) => a.name.localeCompare(b.name));
+  let html = '<option value="">None</option>';
+  if (active.length) {
+    html += active.map(p => `<option value="${p.id}" ${+selectedId===p.id?'selected':''}>${escHtml(p.name)}${p.client ? ' — '+escHtml(p.client) : ''}</option>`).join('');
+  }
+  if (completed.length) {
+    html += `<optgroup label="Completed">` + completed.map(p => `<option value="${p.id}" ${+selectedId===p.id?'selected':''}>${escHtml(p.name)}</option>`).join('') + `</optgroup>`;
+  }
+  return html;
 }
 
 function showAddTransaction() {
@@ -766,9 +802,15 @@ function showAddTransaction() {
               <select id="t-to">${buildAccountOptions(['asset'])}</select>
             </div>
           </div>
-          <div class="form-group">
-            <label>Amount ($)</label>
-            <input type="number" id="t-amount" placeholder="0.00" min="0.01" step="0.01">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Amount ($)</label>
+              <input type="number" id="t-amount" placeholder="0.00" min="0.01" step="0.01">
+            </div>
+            <div class="form-group">
+              <label>Project <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label>
+              <select id="t-project">${buildProjectOptions()}</select>
+            </div>
           </div>
           <div class="form-group">
             <label>Receipt <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label>
@@ -827,7 +869,9 @@ function addTransaction() {
   if (isNaN(amount) || amount <= 0) return alert('Please enter a valid amount.');
   if (type === 'transfer' && fromId === toId) return alert('Transfer accounts must be different.');
 
+  const projVal = document.getElementById('t-project').value;
   const txData = { id: nextId('transaction'), date, type, description: desc, amount, fromAccountId: fromId, toAccountId: toId };
+  if (projVal) txData.projectId = parseInt(projVal);
 
   const fileInput = document.getElementById('t-receipt');
   const file = fileInput && fileInput.files[0];
@@ -899,13 +943,15 @@ function renderInvoices() {
             <button class="btn btn-primary" onclick="showAddInvoice()">+ New Invoice</button>
           </div>`
         : `<div class="table-wrap"><table>
-          <thead><tr><th>#</th><th>Client</th><th>Date</th><th>Due Date</th><th class="text-right">Amount</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>Client</th><th>Project</th><th>Date</th><th>Due Date</th><th class="text-right">Amount</th><th>Status</th><th></th></tr></thead>
           <tbody>
             ${invs.map(inv => {
               const total = invTotal(inv);
+              const pName = getProjectName(inv.projectId);
               return `<tr>
                 <td class="text-mono">#${String(inv.id).padStart(4,'0')}</td>
                 <td class="fw-600">${escHtml(inv.client)}</td>
+                <td>${pName ? `<span class="badge badge-project">${escHtml(pName)}</span>` : '<span class="text-muted">—</span>'}</td>
                 <td class="text-muted">${fmtDate(inv.date)}</td>
                 <td class="text-muted">${fmtDate(inv.dueDate)}</td>
                 <td class="fw-600 text-right">${fmt(total)}</td>
@@ -953,6 +999,10 @@ function showAddInvoice() {
               <label>Due Date</label>
               <input type="date" id="i-due">
             </div>
+          </div>
+          <div class="form-group">
+            <label>Project <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label>
+            <select id="i-project">${buildProjectOptions()}</select>
           </div>
 
           <div class="form-group">
@@ -1053,7 +1103,10 @@ function saveInvoice() {
   if (items.length === 0) return alert('Please add at least one line item.');
   if (items.some(i => !i.desc)) return alert('All line items need a description.');
 
-  db.invoices.push({ id: nextId('invoice'), client, clientEmail: email, date, dueDate: due, items, status: 'draft', notes });
+  const invProjVal = document.getElementById('i-project').value;
+  const invData = { id: nextId('invoice'), client, clientEmail: email, date, dueDate: due, items, status: 'draft', notes };
+  if (invProjVal) invData.projectId = parseInt(invProjVal);
+  db.invoices.push(invData);
   saveDB();
   closeModal();
   renderInvoices();
@@ -1191,7 +1244,7 @@ function paidWithTx(id) {
   const date    = document.getElementById('mp-date').value;
   if (!date) return alert('Please select a date.');
 
-  db.transactions.push({
+  const paidTx = {
     id: nextId('transaction'),
     date,
     type: 'income',
@@ -1199,7 +1252,9 @@ function paidWithTx(id) {
     amount: invTotal(inv),
     fromAccountId: revId,
     toAccountId: assetId
-  });
+  };
+  if (inv.projectId) paidTx.projectId = inv.projectId;
+  db.transactions.push(paidTx);
   setInvStatus(id, 'paid');
   saveDB();
   closeModal();
@@ -1337,6 +1392,297 @@ function renderLedger() {
             }).join('')}
           </tbody>
         </table></div>`}
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════
+// PROJECTS
+// ═══════════════════════════════════════════════════════════
+
+function getProjectName(id) {
+  if (!id) return '';
+  if (!db.projects) return '';
+  const p = db.projects.find(p => p.id === +id);
+  return p ? p.name : '';
+}
+
+function projectIncome(pid) {
+  return db.transactions.filter(t => t.projectId === +pid && t.type === 'income').reduce((s,t) => s + t.amount, 0);
+}
+
+function projectExpenses(pid) {
+  return db.transactions.filter(t => t.projectId === +pid && t.type === 'expense').reduce((s,t) => s + t.amount, 0);
+}
+
+function projectInvoiceTotal(pid) {
+  return db.invoices.filter(i => i.projectId === +pid).reduce((s,i) => s + invTotal(i), 0);
+}
+
+function renderProjects() {
+  if (!db.projects) db.projects = [];
+  const projects = [...db.projects].sort((a,b) => {
+    if (a.status === 'active' && b.status !== 'active') return -1;
+    if (a.status !== 'active' && b.status === 'active') return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="section-header">
+      <div>
+        <div class="section-title">Projects</div>
+        <div class="section-sub">${projects.length} project${projects.length!==1?'s':''}</div>
+      </div>
+      <button class="btn btn-primary" onclick="showAddProject()">+ New Project</button>
+    </div>
+    ${projects.length === 0
+      ? `<div class="card">
+          <div class="empty-state">
+            <div class="empty-icon">📁</div>
+            <div class="empty-title">No projects yet</div>
+            <div class="empty-text">Create projects to track income, expenses, and invoices for clients.</div>
+            <button class="btn btn-primary" onclick="showAddProject()">+ New Project</button>
+          </div>
+        </div>`
+      : `<div class="project-cards">
+          ${projects.map(p => {
+            const inc = projectIncome(p.id);
+            const exp = projectExpenses(p.id);
+            const net = inc - exp;
+            const txCount = db.transactions.filter(t => t.projectId === p.id).length;
+            const invCount = db.invoices.filter(i => i.projectId === p.id).length;
+            return `<div class="project-card" onclick="viewProject(${p.id})">
+              <div class="project-card-header">
+                <div class="project-card-name">${escHtml(p.name)}</div>
+                <span class="badge badge-${p.status}">${p.status}</span>
+              </div>
+              ${p.client ? `<div class="project-card-client">${escHtml(p.client)}</div>` : ''}
+              <div class="project-card-stats">
+                <div class="project-card-stat">
+                  <div class="project-card-stat-label">Income</div>
+                  <div class="project-card-stat-value" style="color:#059669">${fmt(inc)}</div>
+                </div>
+                <div class="project-card-stat">
+                  <div class="project-card-stat-label">Expenses</div>
+                  <div class="project-card-stat-value" style="color:#dc2626">${fmt(exp)}</div>
+                </div>
+                <div class="project-card-stat">
+                  <div class="project-card-stat-label">Profit</div>
+                  <div class="project-card-stat-value" style="color:${net >= 0 ? '#059669' : '#dc2626'}">${fmt(net)}</div>
+                </div>
+              </div>
+              <div style="margin-top:10px;font-size:12px;color:#94a3b8;">${txCount} transaction${txCount!==1?'s':''} · ${invCount} invoice${invCount!==1?'s':''}</div>
+            </div>`;
+          }).join('')}
+        </div>`}
+  `;
+}
+
+function showAddProject() {
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">New Project</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Project Name</label>
+            <input type="text" id="p-name" placeholder="e.g. Website Redesign">
+          </div>
+          <div class="form-group">
+            <label>Client <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label>
+            <input type="text" id="p-client" placeholder="e.g. Acme Corp">
+          </div>
+          <div class="form-group">
+            <label>Description <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label>
+            <textarea id="p-desc" placeholder="Brief description of the project"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="addProject()">Create Project</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.getElementById('p-name').focus();
+}
+
+function addProject() {
+  if (!db.projects) db.projects = [];
+  if (!db.nextId.project) db.nextId.project = 1;
+  const name = document.getElementById('p-name').value.trim();
+  const client = document.getElementById('p-client').value.trim();
+  const desc = document.getElementById('p-desc').value.trim();
+  if (!name) return alert('Please enter a project name.');
+  db.projects.push({ id: nextId('project'), name, client, description: desc, status: 'active' });
+  saveDB();
+  closeModal();
+  renderProjects();
+}
+
+function editProject(id) {
+  if (!db.projects) return;
+  const p = db.projects.find(p => p.id === +id);
+  if (!p) return;
+  openModal(`
+    <div class="modal-overlay" onclick="overlayClick(event)">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Edit Project</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Project Name</label>
+            <input type="text" id="ep-name" value="${escHtml(p.name)}">
+          </div>
+          <div class="form-group">
+            <label>Client <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label>
+            <input type="text" id="ep-client" value="${escHtml(p.client || '')}">
+          </div>
+          <div class="form-group">
+            <label>Description <span style="font-weight:400;color:#94a3b8;text-transform:none">(optional)</span></label>
+            <textarea id="ep-desc">${escHtml(p.description || '')}</textarea>
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select id="ep-status">
+              <option value="active" ${p.status==='active'?'selected':''}>Active</option>
+              <option value="completed" ${p.status==='completed'?'selected':''}>Completed</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveProject(${p.id})">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.getElementById('ep-name').focus();
+}
+
+function saveProject(id) {
+  const p = db.projects.find(p => p.id === +id);
+  if (!p) return;
+  const name = document.getElementById('ep-name').value.trim();
+  if (!name) return alert('Please enter a project name.');
+  p.name = name;
+  p.client = document.getElementById('ep-client').value.trim();
+  p.description = document.getElementById('ep-desc').value.trim();
+  p.status = document.getElementById('ep-status').value;
+  saveDB();
+  closeModal();
+  viewProject(id);
+}
+
+function deleteProject(id) {
+  const txCount = db.transactions.filter(t => t.projectId === +id).length;
+  const invCount = db.invoices.filter(i => i.projectId === +id).length;
+  let msg = 'Delete this project?';
+  if (txCount || invCount) {
+    msg += `\n\nThis will unlink ${txCount} transaction${txCount!==1?'s':''} and ${invCount} invoice${invCount!==1?'s':''} from this project. The transactions and invoices themselves will NOT be deleted.`;
+  }
+  if (!confirm(msg)) return;
+  // Unlink transactions and invoices
+  db.transactions.forEach(t => { if (t.projectId === +id) delete t.projectId; });
+  db.invoices.forEach(i => { if (i.projectId === +id) delete i.projectId; });
+  db.projects = db.projects.filter(p => p.id !== +id);
+  saveDB();
+  renderProjects();
+}
+
+function viewProject(id) {
+  if (!db.projects) return;
+  const p = db.projects.find(p => p.id === +id);
+  if (!p) return;
+
+  const txns = db.transactions.filter(t => t.projectId === +id).sort((a,b) => b.date.localeCompare(a.date));
+  const invs = db.invoices.filter(i => i.projectId === +id).sort((a,b) => b.date.localeCompare(a.date));
+  const inc = projectIncome(id);
+  const exp = projectExpenses(id);
+  const net = inc - exp;
+  const invTotal_ = invs.reduce((s,i) => s + invTotal(i), 0);
+  const invPaid = invs.filter(i => i.status === 'paid').reduce((s,i) => s + invTotal(i), 0);
+
+  document.getElementById('topbar-title').textContent = p.name;
+  document.getElementById('main-content').innerHTML = `
+    <div class="section-header">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="btn btn-sm btn-ghost" onclick="renderProjects();document.getElementById('topbar-title').textContent='Projects';" title="Back to Projects">← Back</button>
+          <div class="section-title">${escHtml(p.name)}</div>
+          <span class="badge badge-${p.status}">${p.status}</span>
+        </div>
+        ${p.client ? `<div class="section-sub">${escHtml(p.client)}</div>` : ''}
+        ${p.description ? `<div class="section-sub">${escHtml(p.description)}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" onclick="editProject(${p.id})">Edit</button>
+        <button class="btn btn-danger" onclick="deleteProject(${p.id})">Delete</button>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Income</div>
+        <div class="stat-value green">${fmt(inc)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Expenses</div>
+        <div class="stat-value ${exp > 0 ? 'red' : ''}">${fmt(exp)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Profit</div>
+        <div class="stat-value ${net >= 0 ? 'green' : 'red'}">${fmt(net)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Invoiced</div>
+        <div class="stat-value">${fmt(invTotal_)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Collected</div>
+        <div class="stat-value green">${fmt(invPaid)}</div>
+      </div>
+    </div>
+
+    <div class="dash-grid">
+      <div class="card">
+        <div class="section-header">
+          <div class="section-title">Transactions</div>
+          <span style="font-size:12px;color:#64748b">${txns.length} record${txns.length!==1?'s':''}</span>
+        </div>
+        ${txns.length === 0
+          ? `<div class="empty-state" style="padding:24px"><div class="empty-text">No transactions linked to this project yet.<br>Assign transactions to this project when creating them.</div></div>`
+          : `<table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th class="text-right">Amount</th></tr></thead><tbody>
+            ${txns.map(t => `<tr>
+              <td class="text-muted">${fmtDate(t.date)}</td>
+              <td>${escHtml(t.description)}</td>
+              <td><span class="badge badge-${t.type}">${t.type}</span></td>
+              <td class="fw-600 text-right" style="color:${t.type==='income'?'#059669':t.type==='expense'?'#dc2626':'#4f46e5'}">${fmt(t.amount)}</td>
+            </tr>`).join('')}
+          </tbody></table>`}
+      </div>
+
+      <div class="card">
+        <div class="section-header">
+          <div class="section-title">Invoices</div>
+          <span style="font-size:12px;color:#64748b">${invs.length} invoice${invs.length!==1?'s':''}</span>
+        </div>
+        ${invs.length === 0
+          ? `<div class="empty-state" style="padding:24px"><div class="empty-text">No invoices linked to this project yet.<br>Assign invoices to this project when creating them.</div></div>`
+          : `<table><thead><tr><th>#</th><th>Client</th><th class="text-right">Amount</th><th>Status</th></tr></thead><tbody>
+            ${invs.map(inv => `<tr>
+              <td class="text-mono">#${String(inv.id).padStart(4,'0')}</td>
+              <td>${escHtml(inv.client)}</td>
+              <td class="fw-600 text-right">${fmt(invTotal(inv))}</td>
+              <td><span class="badge badge-${inv.status}">${inv.status}</span></td>
+            </tr>`).join('')}
+          </tbody></table>`}
+      </div>
     </div>
   `;
 }
@@ -1584,7 +1930,7 @@ async function connectCloud() {
 
     closeModal();
     updateSyncBadge();
-    const renders = { dashboard: renderDashboard, accounts: renderAccounts, transactions: renderTransactions, invoices: renderInvoices, reports: renderReports };
+    const renders = { dashboard: renderDashboard, accounts: renderAccounts, transactions: renderTransactions, invoices: renderInvoices, projects: renderProjects, reports: renderReports };
     if (renders[currentPage]) renders[currentPage]();
 
   } catch (err) {
